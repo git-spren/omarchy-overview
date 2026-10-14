@@ -110,6 +110,10 @@ Item {
   property bool closing: false
   // Headers / zebra bands fade out with the "current" reverse animation.
   property real chromeOpacity: 1
+  // Set when closing because a window / workspace was chosen: the reverse
+  // animation then lands on that workspace instead of the one we came from.
+  // { workspace: HyprlandWorkspace, toplevel: HyprlandToplevel | null }
+  property var closeTarget: null
   // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
   property real zoomScale: 1
   property real zoomTX: 0
@@ -245,6 +249,7 @@ Item {
 
   function open(payloadJson) {
     if (root.closing) root.finishClose()
+    root.closeTarget = null
     root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
@@ -288,6 +293,18 @@ Item {
     root.flying = false
     root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0; root.zoomScrim = 1
     root.chromeOpacity = 1
+    root.closeTarget = null
+  }
+
+  // Close with the reverse animation landing on `target` (see closeTarget);
+  // falls back to an instant close when there is nothing to land on.
+  function closeToward(target) {
+    var ok = target && target.workspace && root.animate && !root.closing && root.flyPhase >= 2
+      && root.groupIndexOfWorkspace(target.workspace) >= 0
+      && target.workspace.monitor && target.workspace.monitor.name === root.overlayMonitorName()
+    if (!ok) { root.dismissNow(); return }
+    root.closeTarget = target
+    root.dismiss()
   }
 
   // Ask the host to hide us; it calls close() back, so this animates.
@@ -384,6 +401,7 @@ Item {
   }
 
   function scheduleRebuild() {
+    if (root.closing) return   // keep the model still while we animate out
     if (root.opened) rebuildTimer.restart()
     else refreshTimer.restart()   // keep window geometry fresh for the fly-in
   }
@@ -403,6 +421,43 @@ Item {
     var my = typeof mon.y === "number" ? mon.y : 0
     if (ipc.size[0] <= 0 || ipc.size[1] <= 0) return null
     return { x: ipc.at[0] - mx, y: ipc.at[1] - my, w: ipc.size[0], h: ipc.size[1] }
+  }
+
+  // Name of the monitor the overlay is shown on.
+  function overlayMonitorName() {
+    if (root.targetScreen && root.targetScreen.name) return root.targetScreen.name
+    return Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+  }
+
+  function sameWorkspace(a, b) {
+    return !!a && !!b && (a === b || (typeof a.id === "number" && a.id === b.id))
+  }
+
+  function groupIndexOfWorkspace(ws) {
+    for (var g = 0; g < root.groups.length; g++)
+      if (root.sameWorkspace(root.groups[g].workspace, ws)) return g
+    return -1
+  }
+
+  // Where a window will sit on the overlay's monitor once its workspace is
+  // shown (Hyprland keeps real positions for windows on hidden workspaces).
+  function landingRect(toplevel) {
+    var ipc = root.ipcOf(toplevel)
+    if (!ipc || !ipc.at || !ipc.size || ipc.mapped === false) return null
+    if (ipc.size[0] <= 0 || ipc.size[1] <= 0) return null
+    var mon = toplevel.monitor
+    if (!mon || mon.name !== root.overlayMonitorName()) return null
+    var mx = typeof mon.x === "number" ? mon.x : 0
+    var my = typeof mon.y === "number" ? mon.y : 0
+    return { x: ipc.at[0] - mx, y: ipc.at[1] - my, w: ipc.size[0], h: ipc.size[1] }
+  }
+
+  // Where a thumbnail flies to when closing: its window's real place on the
+  // chosen workspace (closeTarget), otherwise the current one.
+  function flyBackRect(toplevel) {
+    if (!root.closeTarget) return root.flySource(toplevel)
+    if (!toplevel || !root.sameWorkspace(toplevel.workspace, root.closeTarget.workspace)) return null
+    return root.landingRect(toplevel)
   }
 
   // ---- "all" animation: the overview starts drawn around the live desktop ----
@@ -426,22 +481,29 @@ Item {
   // over the whole monitor in the grid layout, otherwise the active window's
   // thumbnail over the real window, otherwise the current group filling the screen.
   function zoomAnchor() {
-    var gi = root.homeGroupIndex()
+    var target = root.closeTarget
+    var gi = target ? root.groupIndexOfWorkspace(target.workspace) : root.homeGroupIndex()
     var item = gi >= 0 ? groupRepeater.itemAt(gi) : null
     if (!item) return null
     if (root.layoutGrid) {
       var r = item.replicaRegion()
       return r && r.w > 0 ? { from: r, to: { x: 0, y: 0, w: panel.width, h: panel.height } } : null
     }
+    // Columns / rows: the chosen window's thumbnail (else any window of the
+    // chosen workspace, else the active window) over its real place.
     for (var i = 0; i < root.thumbItems.length; i++) {
       var t = root.thumbItems[i]
       if (!t || t.flatIndex < 0 || t.flatIndex >= root.flat.length) continue
       var tl = root.flat[t.flatIndex].toplevel
-      if (!root.isActive(tl)) continue
-      var src = root.flySource(tl)
+      if (target) {
+        if (target.toplevel ? tl !== target.toplevel : !root.sameWorkspace(tl.workspace, target.workspace)) continue
+      } else if (!root.isActive(tl)) {
+        continue
+      }
+      var dst = root.flyBackRect(tl)
       var fg = t.frameGeometry()
-      if (src && fg.w > 0) return { from: fg, to: src }
-      break
+      if (dst && fg.w > 0) return { from: fg, to: dst }
+      if (!target || target.toplevel) break
     }
     var gr = item.sceneRect()
     if (gr.w <= 0 || gr.h <= 0) return null
@@ -532,7 +594,7 @@ Item {
     } else if (toplevel.workspace) {
       root.focusWorkspace(toplevel.workspace, false)
     }
-    root.dismissNow()
+    root.closeToward({ workspace: toplevel.workspace, toplevel: toplevel })
   }
 
   // `activated` goes false for every window once the overlay takes keyboard
@@ -547,7 +609,7 @@ Item {
     if (!workspace) return
     var target = workspace.id > 0 ? String(workspace.id) : String(workspace.name)
     Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + target + "\" })"])
-    if (dismissAfter !== false) root.dismissNow()
+    if (dismissAfter !== false) root.closeToward({ workspace: workspace, toplevel: null })
   }
 
   function focusWorkspaceById(id) {
@@ -700,7 +762,9 @@ Item {
         })
       }
     })
-    return JSON.stringify({ opened: root.opened, closing: root.closing, selectedIndex: root.selectedIndex,
+    return JSON.stringify({ opened: root.opened, closing: root.closing,
+                            closeTarget: root.closeTarget ? (root.closeTarget.workspace.id + ":" + (root.closeTarget.toplevel ? root.closeTarget.toplevel.title : "")) : null,
+                            selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
@@ -735,14 +799,15 @@ Item {
     NumberAnimation { target: root; property: "zoomScale"; to: root.zoomToScale; duration: root.animationMs; easing.type: Easing.OutCubic }
     NumberAnimation { target: root; property: "zoomTX"; to: root.zoomToTX; duration: root.animationMs; easing.type: Easing.OutCubic }
     NumberAnimation { target: root; property: "zoomTY"; to: root.zoomToTY; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+    // Landing on another workspace: keep the dim up while Hyprland switches underneath.
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.OutCubic }
   }
 
   // "current" reverse: the chrome and the scrim fade while the thumbnails fly back.
   ParallelAnimation {
     id: chromeOutAnim
     NumberAnimation { target: root; property: "chromeOpacity"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.OutCubic }
   }
 
   ParallelAnimation {

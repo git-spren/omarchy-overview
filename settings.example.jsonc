@@ -40,8 +40,9 @@
   //              columns and rows layouts the active window's thumbnail starts
   //              over the real window. The dimming fades in with the zoom.
   //   "none"     no animation  (false means the same)
-  // Closing with the toggle key, Escape or a click on the backdrop plays the
-  // same animation in reverse; choosing a window or workspace closes at once.
+  // Closing plays the same animation in reverse: back onto the workspace you
+  // came from (toggle key, Escape, backdrop click) or onto the workspace of
+  // the window you chose (Enter, click, digit keys, workspace headers).
   "animate": "current",
 
   // Length of that animation in milliseconds, 60 to 1000.

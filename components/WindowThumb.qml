@@ -107,7 +107,7 @@ Item {
   // in-flight values and animate to the real window. No source: fade out.
   function startFlyBack() {
     thumb.stopAnimations()
-    var src = overview && overview.animateCurrent ? overview.flySource(thumb.toplevel) : null
+    var src = overview && overview.animateCurrent ? overview.flyBackRect(thumb.toplevel) : null
     if (src && frame.width > 0 && frame.height > 0 && thumb.opacity > 0) {
       var cur = { dx: thumb.flyDX, dy: thumb.flyDY, sx: thumb.flySX, sy: thumb.flySY }
       thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
