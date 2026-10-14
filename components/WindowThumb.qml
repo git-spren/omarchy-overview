@@ -20,6 +20,8 @@ Item {
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
 
   readonly property real borderWidth: Math.max(2, Style.space(2))
+  readonly property real selectedBorderWidth: Math.max(3, Style.space(3))
+  readonly property real selectedZoom: 1.1
 
   // Aspect: real frame once captured, else Hyprland's reported size, else 16:9.
   readonly property real fallbackAspect: {
@@ -35,6 +37,7 @@ Item {
   readonly property real fitH: Math.max(1, fitW / aspect)
 
   width: boxWidth
+  z: selected ? 1 : 0
   height: boxHeight + overview.captionHeight
 
   Rectangle {
@@ -45,13 +48,17 @@ Item {
     y: (thumb.boxHeight - height) / 2
     radius: overview.cornerRadius
     color: overview.surface
-    border.width: thumb.borderWidth
-    border.color: thumb.selected ? overview.selectedBorder
+    // Selected: zoomed, raised above its neighbours, theme accent border.
+    // Active (the window you came from) keeps a dimmer accent so it stays findable.
+    border.width: thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
+    border.color: thumb.selected ? overview.accent
       : thumb.urgent ? overview.urgent
-      : thumb.active ? overview.accent
+      : thumb.active ? Util.alpha(overview.accent, 0.55)
       : overview.borderColor
-    scale: thumb.selected ? 1.02 : 1
-    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+    Behavior on border.color { ColorAnimation { duration: 120 } }
+    scale: thumb.selected ? thumb.selectedZoom : 1
+    z: thumb.selected ? 1 : 0
+    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
     ScreencopyView {
       id: view
