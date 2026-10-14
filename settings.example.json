@@ -1,4 +1,5 @@
 {
   "zoom": "medium",
-  "selectedBorder": "accent"
+  "selectedBorder": "accent",
+  "layout": "columns"
 }

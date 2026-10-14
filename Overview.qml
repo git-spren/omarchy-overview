@@ -20,9 +20,9 @@ Item {
   property bool opened: false
   property var targetScreen: null
 
-  // columns: [{ workspace, label, sub, toplevels: [HyprlandToplevel], firstIndex }]
-  // flat:    [{ col, row, toplevel }] in column-major order, for keyboard navigation
-  property var columns: []
+  // groups: [{ workspace, label, sub, toplevels: [HyprlandToplevel], firstIndex }], one per workspace
+  // flat:   [{ group, item, toplevel }] in group order, for keyboard navigation
+  property var groups: []
   property var flat: []
   property int selectedIndex: -1
 
@@ -44,6 +44,7 @@ Item {
   // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
+  //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace)
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -54,6 +55,7 @@ Item {
     return root.zoomLevels[key] !== undefined ? root.zoomLevels[key] : root.zoomLevels.medium
   }
   readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
+  readonly property bool layoutRows: String(root.settings.layout || "columns").toLowerCase() === "rows"
 
   function colorSetting(value, fallback) {
     var v = String(value || "").trim().toLowerCase()
@@ -94,12 +96,21 @@ Item {
   readonly property int maxColumnWidth: Style.space(800)
   readonly property int minColumnWidth: Style.space(180)
   readonly property int maxThumbHeight: Style.space(480)
+  // rows layout
+  readonly property int rowGap: Style.space(24)
+  readonly property int headerWidth: Style.space(150)
+  readonly property int maxRowHeight: Style.space(440)
+  readonly property int minRowHeight: Style.space(150)
+  readonly property int maxThumbWidth: Style.space(720)
+  readonly property int minThumbWidth: Style.space(160)
 
   readonly property real availWidth: Math.max(0, panel.width - outerMargin * 2)
   readonly property real availHeight: Math.max(0, panel.height - outerMargin * 2)
-  readonly property int columnCount: root.columns.length
-  readonly property real columnWidth: columnCount === 0 ? 0
-    : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (columnCount - 1)) / columnCount))
+  readonly property int groupCount: root.groups.length
+  readonly property real columnWidth: groupCount === 0 ? 0
+    : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (groupCount - 1)) / groupCount))
+  readonly property real rowHeight: groupCount === 0 ? 0
+    : Math.max(minRowHeight, Math.min(maxRowHeight, (availHeight - rowGap * (groupCount - 1)) / groupCount))
 
   // ---- host contract -----------------------------------------------------
 
@@ -167,13 +178,13 @@ Item {
     named.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
 
     var multiMonitor = Hyprland.monitors.values.length > 1
-    var cols = [], flat = []
+    var groups = [], flat = []
     var ordered = numbered.concat(named)
-    for (var c = 0; c < ordered.length; c++) {
-      var w = ordered[c]
+    for (var g = 0; g < ordered.length; g++) {
+      var w = ordered[g]
       var tls = w.toplevels.values.slice()
       tls.sort(root.byPosition)
-      var col = {
+      var entry = {
         workspace: w,
         label: w.id > 0 ? String(w.id) : String(w.name).replace(/^special:/, ""),
         sub: multiMonitor && w.monitor ? w.monitor.name : "",
@@ -181,10 +192,10 @@ Item {
         firstIndex: flat.length
       }
       for (var r = 0; r < tls.length; r++)
-        flat.push({ col: c, row: r, toplevel: tls[r] })
-      cols.push(col)
+        flat.push({ group: g, item: r, toplevel: tls[r] })
+      groups.push(entry)
     }
-    root.columns = cols
+    root.groups = groups
     root.flat = flat
 
     var sel = -1
@@ -265,19 +276,20 @@ Item {
 
   // ---- keyboard ----------------------------------------------------------
 
-  function moveSelection(dCol, dRow) {
+  // dGroup moves to the neighbouring workspace group, dItem within the group.
+  function moveSelection(dGroup, dItem) {
     if (root.flat.length === 0) return
     if (root.selectedIndex < 0) { root.selectedIndex = 0; return }
     var cur = root.flat[root.selectedIndex]
-    var col = cur.col, row = cur.row
-    if (dCol !== 0) {
-      col = Math.max(0, Math.min(root.columns.length - 1, col + dCol))
-      row = Math.min(row, root.columns[col].toplevels.length - 1)
+    var g = cur.group, i = cur.item
+    if (dGroup !== 0) {
+      g = Math.max(0, Math.min(root.groups.length - 1, g + dGroup))
+      i = Math.min(i, root.groups[g].toplevels.length - 1)
     }
-    if (dRow !== 0) {
-      row = Math.max(0, Math.min(root.columns[col].toplevels.length - 1, row + dRow))
+    if (dItem !== 0) {
+      i = Math.max(0, Math.min(root.groups[g].toplevels.length - 1, i + dItem))
     }
-    root.selectedIndex = root.columns[col].firstIndex + row
+    root.selectedIndex = root.groups[g].firstIndex + i
   }
 
   function stepSelection(delta) {
@@ -289,10 +301,12 @@ Item {
   function handleKey(event) {
     var k = event.key
     if (k === Qt.Key_Escape) { root.dismiss(); return true }
-    if (k === Qt.Key_Left) { root.moveSelection(-1, 0); return true }
-    if (k === Qt.Key_Right) { root.moveSelection(1, 0); return true }
-    if (k === Qt.Key_Up) { root.moveSelection(0, -1); return true }
-    if (k === Qt.Key_Down) { root.moveSelection(0, 1); return true }
+    // Columns: left/right = other workspace, up/down = within it. Rows: transposed.
+    var r = root.layoutRows
+    if (k === Qt.Key_Left) { r ? root.moveSelection(0, -1) : root.moveSelection(-1, 0); return true }
+    if (k === Qt.Key_Right) { r ? root.moveSelection(0, 1) : root.moveSelection(1, 0); return true }
+    if (k === Qt.Key_Up) { r ? root.moveSelection(-1, 0) : root.moveSelection(0, -1); return true }
+    if (k === Qt.Key_Down) { r ? root.moveSelection(1, 0) : root.moveSelection(0, 1); return true }
     if (k === Qt.Key_Tab) { root.stepSelection(1); return true }
     if (k === Qt.Key_Backtab) { root.stepSelection(-1); return true }
     if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Space) {
@@ -323,7 +337,7 @@ Item {
 
   // Current model as JSON (for debugging; "state" is taken by Item).
   function dump(arg) {
-    var cols = root.columns.map(function(c) {
+    var groups = root.groups.map(function(c) {
       return {
         workspace: c.label, monitor: c.sub,
         windows: c.toplevels.map(function(t) {
@@ -334,7 +348,7 @@ Item {
     })
     return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
-                            columns: cols })
+                            layout: root.layoutRows ? "rows" : "columns", groups: groups })
   }
 
   // ---- plumbing ----------------------------------------------------------
@@ -393,7 +407,7 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
         Text {
-          visible: root.columnCount === 0
+          visible: root.groupCount === 0
           anchors.centerIn: parent
           text: "No windows open"
           color: root.text
@@ -401,20 +415,25 @@ Item {
           font.pixelSize: Style.font.title
         }
 
-        Row {
-          id: columnsRow
+        Grid {
+          id: groupsGrid
           anchors.centerIn: parent
-          spacing: root.columnGap
+          columns: root.layoutRows ? 1 : Math.max(1, root.groupCount)
+          columnSpacing: root.columnGap
+          rowSpacing: root.rowGap
+          verticalItemAlignment: root.layoutRows ? Grid.AlignVCenter : Grid.AlignTop
+          horizontalItemAlignment: Grid.AlignHCenter
 
           Repeater {
-            model: root.columns
+            model: root.groups
 
-            WorkspaceColumn {
+            WorkspaceGroup {
               required property var modelData
               overview: root
-              column: modelData
-              columnWidth: root.columnWidth
-              availHeight: root.availHeight
+              entry: modelData
+              rows: root.layoutRows
+              groupWidth: root.layoutRows ? root.availWidth : root.columnWidth
+              groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
             }
           }
         }
