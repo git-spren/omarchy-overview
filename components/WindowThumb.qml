@@ -50,12 +50,20 @@ Item {
   property real flySX: 1
   property real flySY: 1
   property real captionOpacity: 1
+  // Where the fly-back ends (set by startFlyBack, read by flyBackAnim).
+  property real backDX: 0
+  property real backDY: 0
+  property real backSX: 1
+  property real backSY: 1
   readonly property int phase: overview ? overview.flyPhase : 2
   opacity: 1
 
+  function stopAnimations() { flyAnim.stop(); fadeAnim.stop(); flyBackAnim.stop(); fadeOutAnim.stop() }
+
   onPhaseChanged: {
-    if (thumb.phase === 1) { flyAnim.stop(); fadeAnim.stop(); thumb.opacity = 0; return }
+    if (thumb.phase === 1) { thumb.stopAnimations(); thumb.opacity = 0; return }
     if (thumb.phase === 2) thumb.startFly()
+    if (thumb.phase === 3) thumb.startFlyBack()
   }
 
   // Registered with the overview so spatial (grid) navigation can compare
@@ -74,7 +82,7 @@ Item {
   // "current": fly from the real window. "all" / "none": just show (the "all"
   // zoom is applied to the whole overview by Overview.qml).
   function startFly() {
-    flyAnim.stop(); fadeAnim.stop()
+    thumb.stopAnimations()
     thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
     var src = overview && overview.animateCurrent ? overview.flySource(thumb.toplevel) : null
     if (src && frame.width > 0 && frame.height > 0) {
@@ -92,6 +100,42 @@ Item {
       if (overview && overview.animateCurrent) fadeAnim.start()
       else thumb.opacity = 1
     }
+  }
+
+  // Reverse of startFly, from wherever the frame is right now (closing can
+  // interrupt the fly-in): measure the slot at identity, then restore the
+  // in-flight values and animate to the real window. No source: fade out.
+  function startFlyBack() {
+    thumb.stopAnimations()
+    var src = overview && overview.animateCurrent ? overview.flySource(thumb.toplevel) : null
+    if (src && frame.width > 0 && frame.height > 0 && thumb.opacity > 0) {
+      var cur = { dx: thumb.flyDX, dy: thumb.flyDY, sx: thumb.flySX, sy: thumb.flySY }
+      thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
+      var g = frame.mapToItem(null, 0, 0)
+      thumb.flyDX = cur.dx; thumb.flyDY = cur.dy; thumb.flySX = cur.sx; thumb.flySY = cur.sy
+      thumb.backDX = src.x - g.x
+      thumb.backDY = src.y - g.y
+      thumb.backSX = src.w / frame.width
+      thumb.backSY = src.h / frame.height
+      flyBackAnim.start()
+    } else {
+      fadeOutAnim.start()
+    }
+  }
+
+  ParallelAnimation {
+    id: flyBackAnim
+    NumberAnimation { target: thumb; property: "flyDX"; to: thumb.backDX; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flyDY"; to: thumb.backDY; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flySX"; to: thumb.backSX; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flySY"; to: thumb.backSY; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "captionOpacity"; to: 0; duration: overview ? Math.min(120, overview.animationMs) : 120; easing.type: Easing.OutCubic }
+  }
+
+  NumberAnimation {
+    id: fadeOutAnim
+    target: thumb; property: "opacity"; to: 0
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
   }
 
   ParallelAnimation {
@@ -168,6 +212,7 @@ Item {
     height: overlayRow.implicitHeight + Style.space(8)
     radius: overview.cornerRadius
     color: Util.alpha(overview.surface, 0.9)
+    opacity: thumb.captionOpacity * overview.zoomScrim   // fades with the zoom / close
     z: 5
 
     Row {

@@ -102,14 +102,22 @@ Item {
   }
 
   // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
-  // fresh window geometry), 2 thumbnails flying / shown.
+  // fresh window geometry), 2 thumbnails flying / shown, 3 flying back (closing).
   property int flyPhase: 0
   property bool flying: false
+  // True while the reverse animation plays; `opened` stays true until it ends so
+  // the host keeps treating the overlay as open.
+  property bool closing: false
+  // Headers / zebra bands fade out with the "current" reverse animation.
+  property real chromeOpacity: 1
   // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
   property real zoomScale: 1
   property real zoomTX: 0
   property real zoomTY: 0
   property real zoomScrim: 1
+  property real zoomToScale: 1
+  property real zoomToTX: 0
+  property real zoomToTY: 0
   // ms spent waiting (after the 45 ms geometry wait) for the current
   // workspace's captures, so the 1:1 start frame shows real content.
   property int flyWaited: 0
@@ -236,6 +244,7 @@ Item {
   // ---- host contract -----------------------------------------------------
 
   function open(payloadJson) {
+    if (root.closing) root.finishClose()
     root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
@@ -253,20 +262,44 @@ Item {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // Host hide / toggle, Escape, backdrop click: play the opening animation in
+  // reverse, then really close. A second close while that runs snaps shut.
   function close() {
-    root.opened = false
-    root.flyPhase = 0
-    root.flying = false
-    flyTimer.stop()
-    flyEndTimer.stop()
-    zoomAnim.stop()
-    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0; root.zoomScrim = 1
+    if (!root.opened) return
+    if (root.closing || !root.animate || root.flyPhase < 2) { root.finishClose(); return }
+    root.closing = true
+    flyTimer.stop(); flyEndTimer.stop(); settleTimer.stop(); rebuildTimer.stop()
+    if (root.animateAll) {
+      root.startZoomBack()
+    } else {
+      root.flying = true
+      root.flyPhase = 3
+      chromeOutAnim.start()
+    }
+    closeTimer.restart()
   }
 
+  function finishClose() {
+    closeTimer.stop(); zoomAnim.stop(); zoomOutAnim.stop(); chromeOutAnim.stop()
+    flyTimer.stop(); flyEndTimer.stop()
+    root.opened = false
+    root.closing = false
+    root.flyPhase = 0
+    root.flying = false
+    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0; root.zoomScrim = 1
+    root.chromeOpacity = 1
+  }
+
+  // Ask the host to hide us; it calls close() back, so this animates.
   function dismiss() {
-    root.close()
-    if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide(root.pluginId)
+    if (root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
+    else root.close()
+  }
+
+  // Close at once (the desktop is about to change under us).
+  function dismissNow() {
+    root.finishClose()
+    root.dismiss()
   }
 
   function toggle() {
@@ -427,30 +460,49 @@ Item {
     return true
   }
 
-  function startZoomAll() {
-    zoomAnim.stop()
-    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0
+  // Scale + translation that puts the anchor over the real desktop. Measured
+  // with the identity transform, so callers must have reset zoomScale/TX/TY.
+  function zoomTarget() {
     var a = root.zoomAnchor()
-    var s, cx, cy
     if (a) {
-      s = a.to.w / a.from.w
-      cx = a.to.x + a.to.w / 2 - (a.from.x + a.from.w / 2) * s
-      cy = a.to.y + a.to.h / 2 - (a.from.y + a.from.h / 2) * s
-    } else {
-      // Nothing to anchor on (empty current workspace): a gentle zoom from the centre.
-      s = 1.08
-      cx = (1 - s) * panel.width / 2
-      cy = (1 - s) * panel.height / 2
+      var s = a.to.w / a.from.w
+      return { s: s,
+               x: a.to.x + a.to.w / 2 - (a.from.x + a.from.w / 2) * s,
+               y: a.to.y + a.to.h / 2 - (a.from.y + a.from.h / 2) * s }
     }
-    root.zoomScale = s
-    root.zoomTX = cx
-    root.zoomTY = cy
+    // Nothing to anchor on (empty current workspace): a gentle zoom from the centre.
+    return { s: 1.08, x: (1 - 1.08) * panel.width / 2, y: (1 - 1.08) * panel.height / 2 }
+  }
+
+  function startZoomAll() {
+    zoomAnim.stop(); zoomOutAnim.stop()
+    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0
+    var t = root.zoomTarget()
+    root.zoomScale = t.s
+    root.zoomTX = t.x
+    root.zoomTY = t.y
     root.zoomScrim = 0
     zoomAnim.start()
   }
 
+  // Reverse: from wherever the zoom is right now back onto the desktop. The
+  // anchor is measured at identity and the in-flight values restored before
+  // the animation starts, so nothing jumps even when closing mid-open.
+  function startZoomBack() {
+    zoomAnim.stop()
+    var cur = { s: root.zoomScale, x: root.zoomTX, y: root.zoomTY }
+    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0
+    var t = root.zoomTarget()
+    root.zoomScale = cur.s; root.zoomTX = cur.x; root.zoomTY = cur.y
+    root.zoomToScale = t.s
+    root.zoomToTX = t.x
+    root.zoomToTY = t.y
+    zoomOutAnim.start()
+  }
+
   // Called with scene coordinates on every pointer move over a thumbnail.
   function pointerMoved(index, sx, sy) {
+    if (root.closing) return
     if (!root.hoverArmed) {
       if (!root.hoverOrigin) { root.hoverOrigin = { x: sx, y: sy }; return }
       if (Math.abs(sx - root.hoverOrigin.x) < 8 && Math.abs(sy - root.hoverOrigin.y) < 8) return
@@ -480,7 +532,7 @@ Item {
     } else if (toplevel.workspace) {
       root.focusWorkspace(toplevel.workspace, false)
     }
-    root.dismiss()
+    root.dismissNow()
   }
 
   // `activated` goes false for every window once the overlay takes keyboard
@@ -495,7 +547,7 @@ Item {
     if (!workspace) return
     var target = workspace.id > 0 ? String(workspace.id) : String(workspace.name)
     Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + target + "\" })"])
-    if (dismissAfter !== false) root.dismiss()
+    if (dismissAfter !== false) root.dismissNow()
   }
 
   function focusWorkspaceById(id) {
@@ -503,7 +555,7 @@ Item {
     for (var i = 0; i < all.length; i++)
       if (all[i].id === id) { root.focusWorkspace(all[i]); return }
     Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + id + "\" })"])
-    root.dismiss()
+    root.dismissNow()
   }
 
   function iconFor(toplevel) {
@@ -593,6 +645,7 @@ Item {
 
   function handleKey(event) {
     var k = event.key
+    if (root.closing) { if (k === Qt.Key_Escape) root.finishClose(); return true }
     if (k === Qt.Key_Escape) { root.dismiss(); return true }
     // Grid: spatial, by on-screen position. Columns: left/right = other
     // workspace, up/down = within it. Rows: transposed.
@@ -647,7 +700,7 @@ Item {
         })
       }
     })
-    return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
+    return JSON.stringify({ opened: root.opened, closing: root.closing, selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
@@ -674,6 +727,23 @@ Item {
     }
   }
   Timer { id: flyEndTimer; interval: root.animationMs + 80; onTriggered: root.flying = false }
+
+  Timer { id: closeTimer; interval: root.animationMs + 40; onTriggered: root.finishClose() }
+
+  ParallelAnimation {
+    id: zoomOutAnim
+    NumberAnimation { target: root; property: "zoomScale"; to: root.zoomToScale; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomTX"; to: root.zoomToTX; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomTY"; to: root.zoomToTY; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+  }
+
+  // "current" reverse: the chrome and the scrim fade while the thumbnails fly back.
+  ParallelAnimation {
+    id: chromeOutAnim
+    NumberAnimation { target: root; property: "chromeOpacity"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+  }
 
   ParallelAnimation {
     id: zoomAnim

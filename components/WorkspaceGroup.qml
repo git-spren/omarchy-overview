@@ -69,6 +69,7 @@ Item {
     width: group.grid ? parent.width : parent.width + overview.columnGap
     height: group.grid ? parent.height : parent.height + overview.rowGap
     radius: overview.cornerRadius
+    opacity: overview.chromeOpacity
     color: group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
     border.width: group.grid ? (group.selectedGroup ? Math.max(2, Style.space(2)) : 1) : 0
     border.color: group.grid && group.selectedGroup ? overview.selectedBorderColor
@@ -82,6 +83,7 @@ Item {
     y: 0
     width: group.rows ? overview.headerWidth - group.gap : group.groupWidth
     height: group.rows ? group.contentHeight : group.headerH
+    opacity: overview.chromeOpacity
 
     Rectangle {
       anchors.fill: parent
