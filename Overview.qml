@@ -802,8 +802,8 @@ Item {
 
   SequentialAnimation {
     id: closeFadeAnim
-    PauseAnimation { duration: Math.round(root.animationMs * 0.5) }
-    NumberAnimation { target: root; property: "closeOpacity"; to: 0; duration: root.closeMs - Math.round(root.animationMs * 0.5); easing.type: Easing.InOutQuad }
+    PauseAnimation { duration: Math.round(root.animationMs * 0.35) }
+    NumberAnimation { target: root; property: "closeOpacity"; to: 0; duration: root.closeMs - Math.round(root.animationMs * 0.35); easing.type: Easing.InOutQuad }
   }
 
   ParallelAnimation {
