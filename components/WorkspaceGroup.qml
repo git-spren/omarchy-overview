@@ -1,24 +1,34 @@
 import QtQuick
 import qs.Commons
 
-// One occupied workspace. Columns layout: header on top, thumbnails stacked
-// vertically. Rows layout: header on the left, thumbnails side by side.
+// One occupied workspace, in one of three modes:
+//   columns: header on top, thumbnails stacked vertically
+//   rows:    header on the left, thumbnails side by side
+//   grid:    a scaled replica of the workspace's monitor with every window at
+//            its real position and size
 Item {
   id: group
 
   property var overview: null
   property var entry: null          // { workspace, label, sub, toplevels, firstIndex }
-  property bool rows: false
+  property string mode: "columns"
   property int groupIndex: 0
-  property real groupWidth: 300     // columns: column width; rows: full available width
-  property real groupHeight: 600    // columns: available height; rows: row height
+  property real groupWidth: 300     // columns: column width; rows: row width; grid: box width
+  property real groupHeight: 600    // columns: available height; rows: row height; grid: unused
 
+  readonly property bool rows: mode === "rows"
+  readonly property bool grid: mode === "grid"
   readonly property var workspace: entry ? entry.workspace : null
   readonly property int count: entry ? entry.toplevels.length : 0
   readonly property bool focusedWorkspace: workspace !== null && workspace.focused
   readonly property real gap: overview.thumbGap
 
-  // Thumbnail box: shrink along the stacking axis so the group always fits.
+  // ---- grid: monitor replica geometry ----
+  readonly property var monitorRect: overview.monitorLogicalRect(workspace ? workspace.monitor : null)
+  readonly property real replicaScale: monitorRect.w > 0 ? groupWidth / monitorRect.w : 0
+  readonly property real replicaHeight: monitorRect.h * replicaScale
+
+  // ---- columns / rows: thumbnail box ----
   readonly property real thumbBoxHeight: count === 0 ? 0 : (rows
     ? Math.max(overview.captionHeight * 2, Math.min(overview.maxThumbHeight, groupHeight - overview.captionHeight))
     : Math.max(overview.captionHeight * 2, Math.min(overview.maxThumbHeight,
@@ -28,25 +38,27 @@ Item {
         (groupWidth - overview.headerWidth - gap * (count - 1)) / count))
     : groupWidth)
 
-  // Rows: header pinned left, thumbnails left-aligned after it.
-  // Columns: header on top, thumbnails stacked below.
   readonly property real contentHeight: rows ? thumbBoxHeight + overview.captionHeight : 0
+  readonly property real headerH: grid ? overview.gridHeaderHeight : overview.headerHeight
+
   width: groupWidth
-  // Columns take the full available height so the zebra bands are uniform.
-  height: rows ? contentHeight : groupHeight
+  height: grid ? headerH + replicaHeight
+        : rows ? contentHeight
+        : overview.headerHeight + gap + thumbs.height
   implicitWidth: width
   implicitHeight: height
 
-  // Very faint zebra band on every other group; extends half a gap on each
-  // side so neighbouring bands meet.
+  // Very faint zebra band on every other group (columns/rows) or box tint (grid).
   Rectangle {
-    visible: group.groupIndex % 2 === 1
-    x: group.rows ? -overview.columnGap / 2 : -overview.columnGap / 2
-    y: group.rows ? -overview.rowGap / 2 : -overview.rowGap / 2
-    width: parent.width + overview.columnGap
-    height: parent.height + overview.rowGap
+    visible: group.grid || group.groupIndex % 2 === 1
+    x: group.grid ? 0 : -overview.columnGap / 2
+    y: group.grid ? 0 : -overview.rowGap / 2
+    width: group.grid ? parent.width : parent.width + overview.columnGap
+    height: group.grid ? parent.height : parent.height + overview.rowGap
     radius: overview.cornerRadius
-    color: overview.zebraColor
+    color: group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
+    border.width: group.grid ? 1 : 0
+    border.color: group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.borderColor
   }
 
   Item {
@@ -54,7 +66,7 @@ Item {
     x: 0
     y: 0
     width: group.rows ? overview.headerWidth - group.gap : group.groupWidth
-    height: group.rows ? group.contentHeight : overview.headerHeight
+    height: group.rows ? group.contentHeight : group.headerH
 
     Rectangle {
       anchors.fill: parent
@@ -74,7 +86,7 @@ Item {
         text: group.entry ? group.entry.label : ""
         color: group.focusedWorkspace ? overview.accent : overview.text
         font.family: overview.fontFamily
-        font.pixelSize: group.rows ? Style.font.display : Style.font.heading
+        font.pixelSize: group.rows ? Style.font.display : (group.grid ? Style.font.title : Style.font.heading)
         font.bold: true
       }
 
@@ -101,8 +113,10 @@ Item {
     }
   }
 
+  // columns / rows: thumbnails in a Grid
   Grid {
     id: thumbs
+    visible: !group.grid
     columns: group.rows ? Math.max(1, group.count) : 1
     rowSpacing: group.gap
     columnSpacing: group.gap
@@ -112,7 +126,7 @@ Item {
     y: group.rows ? 0 : overview.headerHeight + group.gap
 
     Repeater {
-      model: group.entry ? group.entry.toplevels : []
+      model: group.grid || !group.entry ? [] : group.entry.toplevels
 
       WindowThumb {
         required property var modelData
@@ -122,6 +136,46 @@ Item {
         flatIndex: group.entry.firstIndex + index
         boxWidth: group.thumbBoxWidth
         boxHeight: group.thumbBoxHeight
+      }
+    }
+  }
+
+  // grid: monitor replica with windows at their real geometry
+  Item {
+    id: replica
+    visible: group.grid
+    x: 0
+    y: group.headerH
+    width: group.groupWidth
+    height: group.replicaHeight
+    // Keep windows inside the box, except while they fly in from the real screen.
+    clip: !overview.flying
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: overview.focusWorkspace(group.workspace)
+    }
+
+    Repeater {
+      model: group.grid && group.entry ? group.entry.toplevels : []
+
+      WindowThumb {
+        id: gridThumb
+        required property var modelData
+        required property int index
+        readonly property var rect: overview.windowRect(modelData, group.monitorRect)
+        readonly property var ipc: overview.ipcOf(modelData)
+        overview: group.overview
+        toplevel: modelData
+        flatIndex: group.entry.firstIndex + index
+        exact: true
+        x: rect.x * group.replicaScale
+        y: rect.y * group.replicaScale
+        boxWidth: Math.max(4, rect.w * group.replicaScale)
+        boxHeight: Math.max(4, rect.h * group.replicaScale)
+        // Most recently focused on top, selected above all.
+        z: (selected ? 1000 : 0) + (ipc && typeof ipc.focusHistoryID === "number" ? 100 - ipc.focusHistoryID : 0)
       }
     }
   }

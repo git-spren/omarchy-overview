@@ -12,6 +12,9 @@ Item {
   property int flatIndex: -1
   property real boxWidth: 300
   property real boxHeight: 200
+  // exact: the frame fills the box precisely (grid replica); the caption becomes an
+  // overlay that only shows for the selected window.
+  property bool exact: false
 
   readonly property bool selected: overview !== null && overview.selectedIndex === flatIndex
   readonly property bool active: overview !== null && overview.isActive(toplevel)
@@ -107,7 +110,9 @@ Item {
       : thumb.active ? Util.alpha(thumb.selectedColor, 0.55)
       : overview.borderColor
     Behavior on border.color { ColorAnimation { duration: 120 } }
-    scale: thumb.selected ? thumb.selectedZoom : 1
+    // No zoom in the exact (grid) mode: the box clips it and the border + overlay
+    // caption already mark the selection.
+    scale: thumb.selected && !thumb.exact ? thumb.selectedZoom : 1
     z: thumb.selected ? 1 : 0
     transform: [
       Scale { origin.x: 0; origin.y: 0; xScale: thumb.flySX; yScale: thumb.flySY },
@@ -137,7 +142,43 @@ Item {
     }
   }
 
+  // Overlay caption for the exact (grid) mode: shown on the selected window only.
+  Rectangle {
+    visible: thumb.exact && thumb.selected
+    anchors.bottom: frame.bottom
+    anchors.horizontalCenter: frame.horizontalCenter
+    anchors.bottomMargin: thumb.borderWidth + Style.space(4)
+    width: Math.min(frame.width - Style.space(12), overlayRow.implicitWidth + Style.space(16))
+    height: overlayRow.implicitHeight + Style.space(8)
+    radius: overview.cornerRadius
+    color: Util.alpha(overview.surface, 0.9)
+    z: 5
+
+    Row {
+      id: overlayRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      Image {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(16); height: width
+        sourceSize: Qt.size(width, height)
+        source: thumb.iconSource
+        asynchronous: true
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, frame.width - Style.space(50))
+        text: thumb.title
+        elide: Text.ElideRight
+        color: overview.text
+        font.family: overview.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+  }
+
   Row {
+    visible: !thumb.exact
     anchors.top: frame.bottom
     anchors.topMargin: Style.space(6)
     anchors.horizontalCenter: parent.horizontalCenter

@@ -47,7 +47,9 @@ Item {
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
   //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace,
-  //                   left-aligned; more than three workspaces wrap into two columns)
+  //                   left-aligned; more than three workspaces wrap into two columns) |
+  //                   "grid" (a box per workspace replicating the monitor, windows at
+  //                   their real position and size)
   //   animate:        true | false  (default true) - windows of the current workspace fly
   //                   from their real place on screen into their thumbnail slot
   //   animationDuration: milliseconds for that flight (default 240, 60-1000)
@@ -61,7 +63,12 @@ Item {
     return root.zoomLevels[key] !== undefined ? root.zoomLevels[key] : root.zoomLevels.medium
   }
   readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
-  readonly property bool layoutRows: String(root.settings.layout || "columns").toLowerCase() === "rows"
+  readonly property string layoutMode: {
+    var v = String(root.settings.layout || "columns").toLowerCase()
+    return v === "rows" || v === "grid" ? v : "columns"
+  }
+  readonly property bool layoutRows: root.layoutMode === "rows"
+  readonly property bool layoutGrid: root.layoutMode === "grid"
   readonly property bool animate: root.settings.animate !== false
   readonly property int animationMs: {
     var v = Number(root.settings.animationDuration)
@@ -71,6 +78,7 @@ Item {
   // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
   // fresh window geometry), 2 thumbnails flying / shown.
   property int flyPhase: 0
+  property bool flying: false
 
   function colorSetting(value, fallback) {
     var v = String(value || "").trim().toLowerCase()
@@ -124,6 +132,46 @@ Item {
   readonly property int groupCount: root.groups.length
   readonly property real columnWidth: groupCount === 0 ? 0
     : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (groupCount - 1)) / groupCount))
+  // Grid layout: pick the column count that gives the widest boxes for the
+  // focused monitor's aspect ratio.
+  readonly property int gridHeaderHeight: Style.space(34)
+  readonly property var gridMetrics: {
+    var n = root.groupCount
+    if (n === 0) return { cols: 1, boxW: 0 }
+    var mon = root.monitorLogicalRect(Hyprland.focusedMonitor)
+    var aspect = mon.h > 0 ? mon.w / mon.h : 16 / 9
+    var best = null
+    for (var cols = 1; cols <= n; cols++) {
+      var rows = Math.ceil(n / cols)
+      var w = (root.availWidth - root.columnGap * (cols - 1)) / cols
+      var h = (root.availHeight - root.rowGap * (rows - 1)) / rows - root.gridHeaderHeight
+      var boxW = Math.max(0, Math.min(w, h * aspect))
+      if (!best || boxW > best.boxW) best = { cols: cols, boxW: boxW }
+    }
+    return best
+  }
+
+  // Logical size and origin of a HyprlandMonitor (falls back to the overlay's own size).
+  function monitorLogicalRect(mon) {
+    var ipc = mon && mon.lastIpcObject && typeof mon.lastIpcObject === "object" ? mon.lastIpcObject : null
+    var scale = ipc && ipc.scale > 0 ? ipc.scale : (mon && mon.scale > 0 ? mon.scale : 1)
+    var w = ipc && ipc.width > 0 ? ipc.width / scale : (mon && mon.width > 0 ? mon.width / scale : panel.width)
+    var h = ipc && ipc.height > 0 ? ipc.height / scale : (mon && mon.height > 0 ? mon.height / scale : panel.height)
+    var transform = ipc && typeof ipc.transform === "number" ? ipc.transform : 0
+    if (transform % 2 === 1) { var t = w; w = h; h = t }
+    var x = mon && typeof mon.x === "number" ? mon.x : 0
+    var y = mon && typeof mon.y === "number" ? mon.y : 0
+    return { x: x, y: y, w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) }
+  }
+
+  // A window's rectangle relative to its monitor; unknown geometry fills the monitor.
+  function windowRect(toplevel, monRect) {
+    var ipc = root.ipcOf(toplevel)
+    if (!ipc || !ipc.at || !ipc.size || ipc.size[0] <= 0 || ipc.size[1] <= 0)
+      return { x: 0, y: 0, w: monRect.w, h: monRect.h }
+    return { x: ipc.at[0] - monRect.x, y: ipc.at[1] - monRect.y, w: ipc.size[0], h: ipc.size[1] }
+  }
+
   // Rows layout: more than three workspaces wrap into two columns, filled top to bottom.
   readonly property int rowColumns: root.layoutRows && groupCount > 3 ? 2 : 1
   readonly property int rowsPerColumn: groupCount === 0 ? 0 : Math.ceil(groupCount / rowColumns)
@@ -149,7 +197,9 @@ Item {
   function close() {
     root.opened = false
     root.flyPhase = 0
+    root.flying = false
     flyTimer.stop()
+    flyEndTimer.stop()
   }
 
   function dismiss() {
@@ -351,8 +401,8 @@ Item {
   function handleKey(event) {
     var k = event.key
     if (k === Qt.Key_Escape) { root.dismiss(); return true }
-    // Columns: left/right = other workspace, up/down = within it. Rows: transposed.
-    var r = root.layoutRows
+    // Columns: left/right = other workspace, up/down = within it. Rows and grid: transposed.
+    var r = root.layoutRows || root.layoutGrid
     if (k === Qt.Key_Left) { r ? root.moveSelection(0, -1) : root.moveSelection(-1, 0); return true }
     if (k === Qt.Key_Right) { r ? root.moveSelection(0, 1) : root.moveSelection(1, 0); return true }
     if (k === Qt.Key_Up) { r ? root.moveSelection(-1, 0) : root.moveSelection(0, -1); return true }
@@ -399,7 +449,7 @@ Item {
     })
     return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
-                            layout: root.layoutRows ? "rows" : "columns",
+                            layout: root.layoutMode,
                             animate: root.animate, animationDuration: root.animationMs,
                             flyPhase: root.flyPhase, groups: groups })
   }
@@ -407,7 +457,8 @@ Item {
   // ---- plumbing ----------------------------------------------------------
 
   Timer { id: settleTimer; interval: 180; onTriggered: root.rebuild() }
-  Timer { id: flyTimer; interval: 45; onTriggered: if (root.opened) root.flyPhase = 2 }
+  Timer { id: flyTimer; interval: 45; onTriggered: if (root.opened) { root.flying = true; root.flyPhase = 2; flyEndTimer.restart() } }
+  Timer { id: flyEndTimer; interval: root.animationMs + 80; onTriggered: root.flying = false }
   Timer { id: refreshTimer; interval: 120; onTriggered: Hyprland.refreshToplevels() }
   Timer { id: rebuildTimer; interval: 60; onTriggered: { Hyprland.refreshToplevels(); root.rebuild() } }
 
@@ -472,12 +523,14 @@ Item {
         Grid {
           id: groupsGrid
           anchors.centerIn: parent
-          columns: root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
-          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn) : 1
+          columns: root.layoutGrid ? root.gridMetrics.cols
+                 : root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
+          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn)
+              : root.layoutGrid ? Math.max(1, Math.ceil(root.groupCount / root.gridMetrics.cols)) : 1
           flow: root.layoutRows ? Grid.TopToBottom : Grid.LeftToRight
           columnSpacing: root.columnGap
           rowSpacing: root.rowGap
-          verticalItemAlignment: root.layoutRows ? Grid.AlignVCenter : Grid.AlignTop
+          verticalItemAlignment: root.layoutRows || root.layoutGrid ? Grid.AlignVCenter : Grid.AlignTop
           horizontalItemAlignment: root.layoutRows ? Grid.AlignLeft : Grid.AlignHCenter
 
           Repeater {
@@ -489,8 +542,8 @@ Item {
               overview: root
               entry: modelData
               groupIndex: index
-              rows: root.layoutRows
-              groupWidth: root.layoutRows ? root.rowWidth : root.columnWidth
+              mode: root.layoutMode
+              groupWidth: root.layoutGrid ? root.gridMetrics.boxW : root.layoutRows ? root.rowWidth : root.columnWidth
               groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
             }
           }
