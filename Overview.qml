@@ -55,17 +55,17 @@ Item {
   // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
-  //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace,
-  //                   left-aligned; more than three workspaces wrap into two columns) |
-  //                   "grid" (a box per workspace replicating the monitor, windows at
-  //                   their real position and size)
-  //   animate:        "current" (default; true) - windows of the current workspace fly
-  //                   from their real place on screen into their thumbnail slot |
-  //                   "all" - the whole overview is drawn around the live desktop at
-  //                   1:1 (grid: the current workspace's box over the real screen;
-  //                   columns/rows: the active window's thumbnail over the real
-  //                   window) and zooms into view | "none" (false)
-  //   animationDuration: milliseconds for that animation (default 240, 60-1000)
+  //   layout:         "grid" (default; a box per workspace replicating the monitor, windows at
+  //                   their real position and size) | "columns" (one column per workspace) |
+  //                   "rows" (one row per workspace,
+  //                   left-aligned; more than three workspaces wrap into two columns)
+  //   animate:        "all" (default) - the whole overview is drawn around the live
+  //                   desktop at 1:1 (grid: the current workspace's box over the real
+  //                   screen; columns/rows: the active window's thumbnail over the real
+  //                   window) and zooms into view | "current" (true) - windows of the
+  //                   current workspace fly from their real place on screen into their
+  //                   thumbnail slot | "none" (false)
+  //   animationDuration: milliseconds for that animation (default 250, 60-1000)
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -77,28 +77,29 @@ Item {
   }
   readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
   readonly property string layoutMode: {
-    var v = String(root.settings.layout || "columns").toLowerCase()
-    return v === "rows" || v === "grid" ? v : "columns"
+    var v = String(root.settings.layout || "grid").toLowerCase()
+    return v === "rows" || v === "columns" ? v : "grid"
   }
   readonly property bool layoutRows: root.layoutMode === "rows"
   readonly property bool layoutGrid: root.layoutMode === "grid"
   readonly property string animateMode: {
     var v = root.settings.animate
-    if (v === undefined || v === null || v === true) return "current"
+    if (v === undefined || v === null) return "all"
+    if (v === true) return "current"
     if (v === false) return "none"
     var s = String(v).trim().toLowerCase()
     if (s === "current" || s === "all" || s === "none") return s
     if (s === "true" || s === "on") return "current"
     if (s === "false" || s === "off") return "none"
-    console.warn("git-spren.overview: unknown animate value", v, "- using current")
-    return "current"
+    console.warn("git-spren.overview: unknown animate value", v, "- using all")
+    return "all"
   }
   readonly property bool animate: root.animateMode !== "none"
   readonly property bool animateCurrent: root.animateMode === "current"
   readonly property bool animateAll: root.animateMode === "all"
   readonly property int animationMs: {
     var v = Number(root.settings.animationDuration)
-    return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 240
+    return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 250
   }
 
   // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
