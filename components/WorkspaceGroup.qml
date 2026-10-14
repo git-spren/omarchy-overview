@@ -21,6 +21,9 @@ Item {
   readonly property var workspace: entry ? entry.workspace : null
   readonly property int count: entry ? entry.toplevels.length : 0
   readonly property bool focusedWorkspace: workspace !== null && workspace.focused
+  // The selected window lives in this group (grid: the box gets the accent outline).
+  readonly property bool selectedGroup: entry !== null && count > 0
+    && overview.selectedIndex >= entry.firstIndex && overview.selectedIndex < entry.firstIndex + count
   readonly property real gap: overview.thumbGap
 
   // ---- grid: monitor replica geometry ----
@@ -67,8 +70,10 @@ Item {
     height: group.grid ? parent.height : parent.height + overview.rowGap
     radius: overview.cornerRadius
     color: group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
-    border.width: group.grid ? 1 : 0
-    border.color: group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.borderColor
+    border.width: group.grid ? (group.selectedGroup ? Math.max(2, Style.space(2)) : 1) : 0
+    border.color: group.grid && group.selectedGroup ? overview.selectedBorderColor
+      : group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.borderColor
+    Behavior on border.color { ColorAnimation { duration: 120 } }
   }
 
   Item {
