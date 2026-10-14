@@ -57,6 +57,17 @@ Item {
     if (thumb.phase === 2) thumb.startFly()
   }
 
+  // Registered with the overview so spatial (grid) navigation can compare
+  // on-screen positions.
+  Component.onCompleted: if (overview) overview.registerThumb(thumb)
+  Component.onDestruction: if (overview) overview.unregisterThumb(thumb)
+
+  function frameGeometry() {
+    var p = frame.mapToItem(null, 0, 0)
+    return { x: p.x, y: p.y, w: frame.width, h: frame.height,
+             cx: p.x + frame.width / 2, cy: p.y + frame.height / 2 }
+  }
+
   function startFly() {
     flyAnim.stop(); fadeAnim.stop()
     var src = overview && overview.animate ? overview.flySource(thumb.toplevel) : null

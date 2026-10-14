@@ -392,6 +392,47 @@ Item {
     root.selectedIndex = root.groups[g].firstIndex + i
   }
 
+  // ---- spatial navigation (grid layout): nearest thumbnail in a direction ----
+  property var thumbItems: []
+
+  function registerThumb(item) { root.thumbItems.push(item) }
+  function unregisterThumb(item) {
+    var i = root.thumbItems.indexOf(item)
+    if (i >= 0) root.thumbItems.splice(i, 1)
+  }
+
+  // Candidates are ranked in tiers: ahead on the same line, then wrap on the
+  // same line (farthest behind), then ahead on another line, then wrap there.
+  // "Same line" means the frames overlap on the axis perpendicular to the move.
+  function spatialMove(dx, dy) {
+    if (root.flat.length === 0) return
+    var items = root.thumbItems.filter(function(t) { return t && t.flatIndex >= 0 && t.flatIndex < root.flat.length })
+    var cur = null
+    for (var i = 0; i < items.length; i++)
+      if (items[i].flatIndex === root.selectedIndex) { cur = items[i]; break }
+    if (!cur) { root.selectedIndex = items.length ? items[0].flatIndex : 0; return }
+    var c = cur.frameGeometry()
+    var best = [null, null, null, null], bestScore = [Infinity, Infinity, Infinity, Infinity]
+    for (var k = 0; k < items.length; k++) {
+      var t = items[k]
+      if (t === cur) continue
+      var g = t.frameGeometry()
+      var ddx = g.cx - c.cx, ddy = g.cy - c.cy
+      var primary = ddx * dx + ddy * dy                         // along the direction
+      var secondary = Math.abs(ddx * dy) + Math.abs(ddy * dx)   // off-axis drift
+      if (Math.abs(primary) <= 1) continue
+      var sameLine = dx !== 0
+        ? (g.y < c.y + c.h && g.y + g.h > c.y)
+        : (g.x < c.x + c.w && g.x + g.w > c.x)
+      var ahead = primary > 0
+      var tier = sameLine ? (ahead ? 0 : 1) : (ahead ? 2 : 3)
+      var score = ahead ? primary + 1.5 * secondary : 1.5 * secondary - Math.abs(primary)
+      if (score < bestScore[tier]) { bestScore[tier] = score; best[tier] = t }
+    }
+    for (var tr = 0; tr < 4; tr++)
+      if (best[tr]) { root.selectedIndex = best[tr].flatIndex; return }
+  }
+
   function stepSelection(delta) {
     if (root.flat.length === 0) return
     var n = root.flat.length
@@ -401,8 +442,15 @@ Item {
   function handleKey(event) {
     var k = event.key
     if (k === Qt.Key_Escape) { root.dismiss(); return true }
-    // Columns: left/right = other workspace, up/down = within it. Rows and grid: transposed.
-    var r = root.layoutRows || root.layoutGrid
+    // Grid: spatial, by on-screen position. Columns: left/right = other
+    // workspace, up/down = within it. Rows: transposed.
+    if (root.layoutGrid) {
+      if (k === Qt.Key_Left) { root.spatialMove(-1, 0); return true }
+      if (k === Qt.Key_Right) { root.spatialMove(1, 0); return true }
+      if (k === Qt.Key_Up) { root.spatialMove(0, -1); return true }
+      if (k === Qt.Key_Down) { root.spatialMove(0, 1); return true }
+    }
+    var r = root.layoutRows
     if (k === Qt.Key_Left) { r ? root.moveSelection(0, -1) : root.moveSelection(-1, 0); return true }
     if (k === Qt.Key_Right) { r ? root.moveSelection(0, 1) : root.moveSelection(1, 0); return true }
     if (k === Qt.Key_Up) { r ? root.moveSelection(-1, 0) : root.moveSelection(0, -1); return true }
