@@ -23,8 +23,8 @@ Item {
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
   readonly property bool hasContent: view.hasContent
 
-  readonly property real borderWidth: Math.max(2, Style.space(2))
-  readonly property real selectedBorderWidth: Math.max(3, Style.space(3))
+  readonly property real borderWidth: Math.max(1, Style.space(1))
+  readonly property real selectedBorderWidth: Math.max(2, Style.space(2))
   readonly property real selectedZoom: overview ? overview.selectedZoom : 1.1
   readonly property color selectedColor: overview ? overview.selectedBorderColor : "white"
 
