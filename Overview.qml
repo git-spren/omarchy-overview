@@ -91,8 +91,28 @@ Item {
     return fallback
   }
 
+  // Strip // and /* */ comments and trailing commas (outside strings) so the
+  // settings file can be JSONC, like Omarchy's own menu config.
+  function stripJsonc(text) {
+    var out = "", i = 0, n = text.length, inStr = false
+    while (i < n) {
+      var ch = text[i]
+      if (inStr) {
+        out += ch
+        if (ch === "\\" && i + 1 < n) { out += text[i + 1]; i += 2; continue }
+        if (ch === "\"") inStr = false
+        i++; continue
+      }
+      if (ch === "\"") { inStr = true; out += ch; i++; continue }
+      if (ch === "/" && text[i + 1] === "/") { while (i < n && text[i] !== "\n") i++; continue }
+      if (ch === "/" && text[i + 1] === "*") { i += 2; while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++; i += 2; continue }
+      out += ch; i++
+    }
+    return out.replace(/,(\s*[}\]])/g, "$1")
+  }
+
   function applySettings(raw) {
-    var text = String(raw || "").trim()
+    var text = root.stripJsonc(String(raw || "")).trim()
     if (!text) { root.settings = ({}); return }
     try {
       var parsed = JSON.parse(text)

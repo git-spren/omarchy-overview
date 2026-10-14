@@ -1,0 +1,40 @@
+// git-spren.overview settings. Copy this file to ~/.config/omarchy/git-spren.overview.json
+// (comments and trailing commas are allowed) and edit; changes apply on save,
+// no shell restart needed. Every key is optional; the values shown are the
+// defaults. Unknown values fall back to the default and log a warning in
+// `qs log -p /usr/share/omarchy/shell`.
+{
+  // How the workspaces are arranged.
+  //   "columns"  one column per workspace, number on top, windows stacked
+  //   "rows"     one row per workspace, number on the left, windows side by
+  //              side, left-aligned; more than three workspaces wrap into
+  //              two columns filled top to bottom
+  //   "grid"     one box per workspace replicating its monitor, every window
+  //              at its real position and size; arrow keys move spatially
+  "layout": "columns",
+
+  // How much the selected thumbnail grows (columns and rows layouts only;
+  // grid never zooms because the boxes clip).
+  //   "small"    1.02
+  //   "medium"   1.10
+  //   "large"    1.20
+  //   a number   any factor from 1.0 to 2.0, e.g. 1.35
+  "zoom": "medium",
+
+  // Border colour of the selected window. The window you came from gets the
+  // same colour at 55 % opacity.
+  //   "accent"      the theme accent colour
+  //   "selected"    the theme's menu selection border
+  //   "foreground"  the theme foreground
+  //   "urgent"      the theme urgent / error colour
+  //   "#rrggbb"     any hex colour (#rgb, #rgba and #rrggbbaa work too)
+  "selectedBorder": "accent",
+
+  // Fly-in on open: windows of the current workspace start at their real place
+  // on screen and glide into their slot; everything else fades in.
+  //   true / false
+  "animate": true,
+
+  // Length of that flight in milliseconds, 60 to 1000.
+  "animationDuration": 240
+}
