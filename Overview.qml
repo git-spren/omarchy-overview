@@ -23,6 +23,7 @@ Item {
   // groups: [{ workspace, label, sub, toplevels: [HyprlandToplevel], firstIndex }], one per workspace
   // flat:   [{ group, item, toplevel }] in group order, for keyboard navigation
   property var groups: []
+  property string groupSignature: ""
   property var flat: []
   property int selectedIndex: -1
 
@@ -47,6 +48,9 @@ Item {
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
   //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace,
   //                   left-aligned; more than three workspaces wrap into two columns)
+  //   animate:        true | false  (default true) - windows of the current workspace fly
+  //                   from their real place on screen into their thumbnail slot
+  //   animationDuration: milliseconds for that flight (default 240, 60-1000)
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -58,6 +62,15 @@ Item {
   }
   readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
   readonly property bool layoutRows: String(root.settings.layout || "columns").toLowerCase() === "rows"
+  readonly property bool animate: root.settings.animate !== false
+  readonly property int animationMs: {
+    var v = Number(root.settings.animationDuration)
+    return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 240
+  }
+
+  // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
+  // fresh window geometry), 2 thumbnails flying / shown.
+  property int flyPhase: 0
 
   function colorSetting(value, fallback) {
     var v = String(value || "").trim().toLowerCase()
@@ -125,7 +138,9 @@ Item {
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
     root.rebuild()
+    root.flyPhase = root.animate ? 1 : 2
     root.opened = true
+    if (root.animate) flyTimer.restart()
     // IPC data (window positions) arrives a moment later; re-sort once it does.
     settleTimer.restart()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -133,6 +148,8 @@ Item {
 
   function close() {
     root.opened = false
+    root.flyPhase = 0
+    flyTimer.stop()
   }
 
   function dismiss() {
@@ -201,8 +218,14 @@ Item {
         flat.push({ group: g, item: r, toplevel: tls[r] })
       groups.push(entry)
     }
-    root.groups = groups
-    root.flat = flat
+    var signature = groups.map(function(c) {
+      return c.label + ":" + c.toplevels.map(function(t) { return t.address }).join(",")
+    }).join("|")
+    if (signature !== root.groupSignature) {
+      root.groupSignature = signature
+      root.groups = groups
+      root.flat = flat
+    }
 
     var sel = -1
     for (var k = 0; k < flat.length; k++) {
@@ -218,6 +241,24 @@ Item {
 
   function scheduleRebuild() {
     if (root.opened) rebuildTimer.restart()
+    else refreshTimer.restart()   // keep window geometry fresh for the fly-in
+  }
+
+  // Where a window sits on the overlay's monitor right now, in overlay
+  // coordinates, or null when it is not visible there (other workspace or
+  // monitor, hidden, unmapped).
+  function flySource(toplevel) {
+    var ipc = root.ipcOf(toplevel)
+    if (!ipc || !ipc.at || !ipc.size || ipc.hidden || ipc.mapped === false) return null
+    var ws = toplevel.workspace
+    var mon = toplevel.monitor
+    var focused = Hyprland.focusedMonitor
+    if (!ws || !mon || !focused || mon.name !== focused.name) return null
+    if (!(ws.active || (ipc.pinned === true))) return null
+    var mx = typeof mon.x === "number" ? mon.x : 0
+    var my = typeof mon.y === "number" ? mon.y : 0
+    if (ipc.size[0] <= 0 || ipc.size[1] <= 0) return null
+    return { x: ipc.at[0] - mx, y: ipc.at[1] - my, w: ipc.size[0], h: ipc.size[1] }
   }
 
   function selectedToplevel() {
@@ -351,24 +392,28 @@ Item {
         workspace: c.label, monitor: c.sub,
         windows: c.toplevels.map(function(t) {
           return { title: t.title, address: t.address, active: root.isActive(t),
+                   fly: root.flySource(t),
                    appId: t.wayland ? t.wayland.appId : null }
         })
       }
     })
     return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
-                            layout: root.layoutRows ? "rows" : "columns", groups: groups })
+                            layout: root.layoutRows ? "rows" : "columns",
+                            animate: root.animate, animationDuration: root.animationMs,
+                            flyPhase: root.flyPhase, groups: groups })
   }
 
   // ---- plumbing ----------------------------------------------------------
 
   Timer { id: settleTimer; interval: 180; onTriggered: root.rebuild() }
+  Timer { id: flyTimer; interval: 45; onTriggered: if (root.opened) root.flyPhase = 2 }
+  Timer { id: refreshTimer; interval: 120; onTriggered: Hyprland.refreshToplevels() }
   Timer { id: rebuildTimer; interval: 60; onTriggered: { Hyprland.refreshToplevels(); root.rebuild() } }
 
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      if (!root.opened) return
       var name = String(event.name)
       if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|activewindow(v2)?|changefloatingmode|fullscreen)$/.test(name))
         root.scheduleRebuild()

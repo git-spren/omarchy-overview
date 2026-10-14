@@ -1,5 +1,7 @@
 {
   "zoom": "medium",
   "selectedBorder": "accent",
-  "layout": "columns"
+  "layout": "columns",
+  "animate": true,
+  "animationDuration": 240
 }

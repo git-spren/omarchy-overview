@@ -39,6 +39,56 @@ Item {
 
   width: boxWidth
   z: selected ? 1 : 0
+
+  // ---- fly-in: start at the window's real geometry, settle into the slot ----
+  property real flyDX: 0
+  property real flyDY: 0
+  property real flySX: 1
+  property real flySY: 1
+  property real captionOpacity: 1
+  readonly property int phase: overview ? overview.flyPhase : 2
+  opacity: 1
+
+  onPhaseChanged: {
+    if (thumb.phase === 1) { flyAnim.stop(); fadeAnim.stop(); thumb.opacity = 0; return }
+    if (thumb.phase === 2) thumb.startFly()
+  }
+
+  function startFly() {
+    flyAnim.stop(); fadeAnim.stop()
+    var src = overview && overview.animate ? overview.flySource(thumb.toplevel) : null
+    if (src && frame.width > 0 && frame.height > 0) {
+      // Frame starts exactly over the real window, then settles into its slot.
+      var g = frame.mapToItem(null, 0, 0)
+      thumb.flyDX = src.x - g.x
+      thumb.flyDY = src.y - g.y
+      thumb.flySX = src.w / frame.width
+      thumb.flySY = src.h / frame.height
+      thumb.captionOpacity = 0
+      thumb.opacity = 1
+      flyAnim.start()
+    } else {
+      thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
+      thumb.captionOpacity = 1
+      if (overview && overview.animate) fadeAnim.start()
+      else thumb.opacity = 1
+    }
+  }
+
+  ParallelAnimation {
+    id: flyAnim
+    NumberAnimation { target: thumb; property: "flyDX"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flyDY"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flySX"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flySY"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "captionOpacity"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.InCubic }
+  }
+
+  NumberAnimation {
+    id: fadeAnim
+    target: thumb; property: "opacity"; from: 0; to: 1
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
+  }
   height: boxHeight + overview.captionHeight
 
   Rectangle {
@@ -59,6 +109,10 @@ Item {
     Behavior on border.color { ColorAnimation { duration: 120 } }
     scale: thumb.selected ? thumb.selectedZoom : 1
     z: thumb.selected ? 1 : 0
+    transform: [
+      Scale { origin.x: 0; origin.y: 0; xScale: thumb.flySX; yScale: thumb.flySY },
+      Translate { x: thumb.flyDX; y: thumb.flyDY }
+    ]
     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
     ScreencopyView {
@@ -89,6 +143,7 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
     width: Math.min(parent.width, implicitWidth)
     spacing: Style.space(6)
+    opacity: thumb.captionOpacity
 
     Image {
       anchors.verticalCenter: parent.verticalCenter
