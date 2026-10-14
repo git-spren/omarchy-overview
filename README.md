@@ -1,0 +1,101 @@
+# omarchy-overview
+
+An Exposé / Mission Control style window overview for [Omarchy](https://omarchy.org).
+One key shows every open window as a live thumbnail, grouped by workspace, including
+windows on workspaces you can't currently see. Pick a window with the mouse or the
+keyboard and you land on it, workspace switch included.
+
+It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Quickshell.
+
+## Features
+
+- **Live thumbnails** of every window on every workspace, via Hyprland's toplevel
+  export. Nothing is captured while the overview is closed, so it costs nothing at idle.
+- **Three layouts.** The default `grid` draws one box per workspace that mirrors your
+  monitor, with each window at its real position and size. `columns` gives one column
+  per workspace, and `rows` one row per workspace.
+- **Type to search.** Printable keys start a fuzzy search over window titles, app ids
+  and classes. Windows that don't match are dimmed and skipped by navigation, and the
+  best match is selected, so a few letters and Enter are often all you need.
+- **Keyboard navigation.** Arrow keys move spatially in the grid (and along
+  columns/rows in the other layouts), Tab walks every window in order, digits jump to a
+  workspace, Enter or Space focuses the selected window.
+- **Animations.** By default the overview zooms out from the live desktop and zooms
+  back into the workspace you pick when it closes.
+- **Themed.** Colours come from the current Omarchy theme's menu tokens.
+
+### Searching
+
+Typing narrows the overview to the windows whose title, app id or class match
+(`fo` finds Firefox and every `foot` terminal). The query and the "matches / total" count
+show in the pill at the top. Every match shows its caption, and the rest are dimmed.
+
+## Keys
+
+| Key | Action |
+|---|---|
+| `SUPER + F3` | open / close the overview (see [Install](#install)) |
+| arrows | move the selection (spatial in grid; wraps around) |
+| `Tab` / `Shift+Tab` | next / previous window |
+| `Enter` (`Space` while the query is empty) | focus the selected window |
+| `1`–`9`, `0` (while the query is empty) | jump to workspace 1–9, 10 |
+| letters, digits, punctuation | type into the search |
+| `Backspace`, `Ctrl+Backspace`, `Ctrl+U` | edit the search |
+| `Escape` | clear the search, then close |
+| click a window / click the backdrop | focus it / close |
+
+## Install
+
+Requires Omarchy 4 (tested on 4.0.4 with Hyprland 0.56.2 and Quickshell 0.3.1).
+
+```sh
+omarchy plugin add <path-or-url-of-this-repo> --enable --yes
+```
+
+From a checkout, `bin/install` does the same with the current committed `HEAD`.
+
+Then bind a key in `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + F3", "Window overview", "omarchy-shell shell toggle git-spren.overview")
+```
+
+and turn off Hyprland's own layer animation for the overlay in
+`~/.config/hypr/looknfeel.lua`, so it doesn't fight the plugin's animation:
+
+```lua
+hl.layer_rule({ match = { namespace = "git-spren-overview" }, no_anim = true, animation = "none" })
+```
+
+## Settings
+
+All settings are optional. Copy [`settings.example.jsonc`](settings.example.jsonc) to
+`~/.config/omarchy/git-spren.overview.json` and edit it. Changes apply on save; you don't need to
+restart the shell. Comments and trailing commas are allowed.
+
+| Key | Values | Default |
+|---|---|---|
+| `layout` | `"grid"`, `"columns"`, `"rows"` | `"grid"` |
+| `zoom` | selected-thumbnail zoom in columns/rows: `"small"`, `"medium"`, `"large"` or a number 1.0–2.0 | `"medium"` |
+| `selectedBorder` | `"accent"`, `"selected"`, `"foreground"`, `"urgent"` or `"#rrggbb"` | `"accent"` |
+| `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
+| `animationDuration` | milliseconds, 60–1000 | `250` |
+
+## Development
+
+```sh
+omarchy plugin validate .                     # check the manifest
+bin/sync                                      # copy into the plugin dir and restart the shell
+omarchy-shell shell toggle git-spren.overview       # open / close
+omarchy-shell shell call git-spren.overview dump "" # current model as JSON
+omarchy-shell shell call git-spren.overview press down
+omarchy-shell shell call git-spren.overview type "fire"
+qs log -p /usr/share/omarchy/shell            # shell log (QML errors, settings warnings)
+```
+
+[`AGENTS.md`](AGENTS.md) covers the internals: the host contract, how thumbnails of hidden
+workspaces work, activation through `hyprctl`, and how the animations work.
+
+## License
+
+MIT (as declared in `manifest.json`)
