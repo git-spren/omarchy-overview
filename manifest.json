@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "git-spren.overview",
+  "name": "Window overview",
+  "version": "0.1.0",
+  "author": "git-spren",
+  "description": "Exposé-style overview: live thumbnails of every window, one column per workspace",
+  "license": "MIT",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": { "overlay": "Overview.qml" }
+}

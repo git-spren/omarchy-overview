@@ -1,0 +1,27 @@
+#!/bin/bash
+# Copy the plugin into the live Omarchy plugin directory and restart the shell.
+# The shell's inotify hot-reload re-creates the plugin Loader but Qt keeps the
+# old component cached, so edited QML only takes effect after a shell restart
+# (verified on Omarchy 4.0.4 / Quickshell 0.3.1). Pass --no-restart to skip it.
+set -euo pipefail
+restart=1
+[[ ${1-} == --no-restart ]] && restart=0
+src=$(cd "$(dirname "$0")/.." && pwd)
+id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$src/manifest.json")
+dest=$HOME/.config/omarchy/plugins/$id
+mkdir -p "$dest"
+rsync -a --delete \
+  --exclude .git --exclude-from "$src/.git/info/exclude" \
+  --exclude .mise.toml --exclude .gitignore --exclude bin \
+  "$src/" "$dest/"
+echo "synced $id -> $dest"
+if (( restart )); then
+  omarchy restart shell >/dev/null 2>&1
+  for _ in $(seq 1 40); do
+    omarchy-shell shell ping >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  echo "shell restarted"
+else
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+fi

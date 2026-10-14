@@ -1,0 +1,11 @@
+#!/bin/bash
+# First-time install through the real plugin flow: omarchy clones this repo
+# (committed HEAD, so commit first), validates the manifest and enables it.
+set -euo pipefail
+src=$(cd "$(dirname "$0")/.." && pwd)
+id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$src/manifest.json")
+if [[ -d $HOME/.config/omarchy/plugins/$id ]]; then
+  echo "install: $id is already installed; use bin/sync to push changes" >&2
+  exit 0
+fi
+omarchy plugin add "$src" --enable --yes
