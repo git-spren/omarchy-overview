@@ -221,7 +221,11 @@ Item {
     anchors.fill: frame
     hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
-    onEntered: if (overview) overview.selectedIndex = thumb.flatIndex
+    onPositionChanged: function(mouse) {
+      if (!overview) return
+      var p = mapToItem(null, mouse.x, mouse.y)
+      overview.pointerMoved(thumb.flatIndex, p.x, p.y)
+    }
     onClicked: if (overview) overview.activate(thumb.toplevel)
   }
 }

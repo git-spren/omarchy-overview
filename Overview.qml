@@ -26,6 +26,15 @@ Item {
   property string groupSignature: ""
   property var flat: []
   property int selectedIndex: -1
+  // False until the user moves the selection after open; while false every
+  // rebuild re-selects the active window (fresh focus data can arrive late),
+  // so SUPER+E then Enter always returns to the window you came from.
+  property bool selectionTouched: false
+  // Hover only selects after the pointer has really moved since open (Qt sends
+  // synthetic hover events when a surface appears under a still cursor), so a
+  // thumbnail that happens to sit under the pointer does not steal the selection.
+  property bool hoverArmed: false
+  property var hoverOrigin: null
 
   readonly property string pluginId: (root.manifest && root.manifest.id) || "git-spren.overview"
 
@@ -205,6 +214,10 @@ Item {
     root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
+    root.selectionTouched = false
+    root.hoverArmed = false
+    root.hoverOrigin = null
+    root.selectedIndex = -1
     root.rebuild()
     root.flyPhase = root.animate ? 1 : 2
     root.opened = true
@@ -258,7 +271,7 @@ Item {
   }
 
   function rebuild() {
-    var selectedAddress = root.selectedToplevel() ? root.selectedToplevel().address : ""
+    var selectedAddress = root.selectionTouched && root.selectedToplevel() ? root.selectedToplevel().address : ""
     var numbered = [], named = []
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++) {
@@ -331,6 +344,17 @@ Item {
     return { x: ipc.at[0] - mx, y: ipc.at[1] - my, w: ipc.size[0], h: ipc.size[1] }
   }
 
+  // Called with scene coordinates on every pointer move over a thumbnail.
+  function pointerMoved(index, sx, sy) {
+    if (!root.hoverArmed) {
+      if (!root.hoverOrigin) { root.hoverOrigin = { x: sx, y: sy }; return }
+      if (Math.abs(sx - root.hoverOrigin.x) < 8 && Math.abs(sy - root.hoverOrigin.y) < 8) return
+      root.hoverArmed = true
+    }
+    root.selectionTouched = true
+    root.selectedIndex = index
+  }
+
   function selectedToplevel() {
     if (root.selectedIndex < 0 || root.selectedIndex >= root.flat.length) return null
     return root.flat[root.selectedIndex].toplevel
@@ -396,6 +420,7 @@ Item {
   // dGroup moves to the neighbouring workspace group, dItem within the group.
   // Both axes wrap around.
   function moveSelection(dGroup, dItem) {
+    root.selectionTouched = true
     if (root.flat.length === 0) return
     if (root.selectedIndex < 0) { root.selectedIndex = 0; return }
     var cur = root.flat[root.selectedIndex]
@@ -425,6 +450,7 @@ Item {
   // same line (farthest behind), then ahead on another line, then wrap there.
   // "Same line" means the frames overlap on the axis perpendicular to the move.
   function spatialMove(dx, dy) {
+    root.selectionTouched = true
     if (root.flat.length === 0) return
     var items = root.thumbItems.filter(function(t) { return t && t.flatIndex >= 0 && t.flatIndex < root.flat.length })
     var cur = null
@@ -454,6 +480,7 @@ Item {
   }
 
   function stepSelection(delta) {
+    root.selectionTouched = true
     if (root.flat.length === 0) return
     var n = root.flat.length
     root.selectedIndex = ((root.selectedIndex + delta) % n + n) % n
@@ -519,7 +546,7 @@ Item {
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
                             animate: root.animate, animationDuration: root.animationMs,
-                            flyPhase: root.flyPhase, groups: groups })
+                            flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
   // ---- plumbing ----------------------------------------------------------
@@ -593,8 +620,10 @@ Item {
           anchors.centerIn: parent
           columns: root.layoutGrid ? root.gridMetrics.cols
                  : root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
-          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn)
-              : root.layoutGrid ? Math.max(1, Math.ceil(root.groupCount / root.gridMetrics.cols)) : 1
+          // Only the rows layout needs an explicit row count (it flows top to
+          // bottom); elsewhere Grid derives rows from columns, which avoids a
+          // transient "more items than rows*columns" warning on layout changes.
+          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn) : -1
           flow: root.layoutRows ? Grid.TopToBottom : Grid.LeftToRight
           columnSpacing: root.columnGap
           rowSpacing: root.rowGap
