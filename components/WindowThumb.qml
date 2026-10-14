@@ -22,6 +22,10 @@ Item {
   readonly property string title: toplevel ? String(toplevel.title || (toplevel.wayland ? toplevel.wayland.appId : "") || "") : ""
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
   readonly property bool hasContent: view.hasContent
+  // Search: windows that do not match the typed query are dimmed.
+  readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
+  property real dim: matched ? 0 : 1
+  Behavior on dim { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
   readonly property real borderWidth: Math.max(1, Style.space(1))
   readonly property real selectedBorderWidth: Math.max(2, Style.space(2))
@@ -200,11 +204,21 @@ Item {
       source: thumb.iconSource
       asynchronous: true
     }
+
+    // Search dim: darken (not fade, which would wash out against the box tint).
+    Rectangle {
+      anchors.fill: parent
+      radius: parent.radius
+      color: Color.background
+      opacity: thumb.dim * 0.78
+      visible: opacity > 0
+    }
   }
 
-  // Overlay caption for the exact (grid) mode: shown on the selected window only.
+  // Overlay caption for the exact (grid) mode: shown on the selected window, and
+  // on every match while searching.
   Rectangle {
-    visible: thumb.exact && thumb.selected
+    visible: thumb.exact && (thumb.selected || (overview.query !== "" && thumb.matched))
     anchors.bottom: frame.bottom
     anchors.horizontalCenter: frame.horizontalCenter
     anchors.bottomMargin: thumb.borderWidth + Style.space(4)
@@ -245,7 +259,7 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
     width: Math.min(parent.width, implicitWidth)
     spacing: Style.space(6)
-    opacity: thumb.captionOpacity
+    opacity: thumb.captionOpacity * (1 - 0.65 * thumb.dim)
 
     Image {
       anchors.verticalCenter: parent.verticalCenter

@@ -262,6 +262,7 @@ Item {
     root.hoverArmed = false
     root.hoverOrigin = null
     root.selectedIndex = -1
+    root.query = ""
     root.rebuild()
     root.flyPhase = root.animate ? 1 : 2
     root.flyWaited = 0
@@ -405,6 +406,7 @@ Item {
     }
     if (sel < 0 && flat.length > 0) sel = 0
     root.selectedIndex = sel
+    if (root.query !== "") root.selectBestMatch()
   }
 
   function scheduleRebuild() {
@@ -577,6 +579,7 @@ Item {
       if (Math.abs(sx - root.hoverOrigin.x) < 8 && Math.abs(sy - root.hoverOrigin.y) < 8) return
       root.hoverArmed = true
     }
+    if (!root.isMatch(index)) return
     root.selectionTouched = true
     root.selectedIndex = index
   }
@@ -668,12 +671,22 @@ Item {
     var g = cur.group, i = cur.item
     var n = root.groups.length
     if (dGroup !== 0) {
-      g = ((g + dGroup) % n + n) % n
-      i = Math.min(i, root.groups[g].toplevels.length - 1)
+      // Next group with a match; land on the match closest to the current row.
+      for (var step = 0; step < n; step++) {
+        g = ((g + dGroup) % n + n) % n
+        var best = -1
+        for (var j = 0; j < root.groups[g].toplevels.length; j++)
+          if (root.isMatch(root.groups[g].firstIndex + j) && (best < 0 || Math.abs(j - i) < Math.abs(best - i))) best = j
+        if (best >= 0) { i = best; break }
+      }
+      if (best < 0) return
     }
     if (dItem !== 0) {
       var m = root.groups[g].toplevels.length
-      i = ((i + dItem) % m + m) % m
+      for (var s = 0; s < m; s++) {
+        i = ((i + dItem) % m + m) % m
+        if (root.isMatch(root.groups[g].firstIndex + i)) break
+      }
     }
     root.selectedIndex = root.groups[g].firstIndex + i
   }
@@ -693,7 +706,10 @@ Item {
   function spatialMove(dx, dy) {
     root.selectionTouched = true
     if (root.flat.length === 0) return
-    var items = root.thumbItems.filter(function(t) { return t && t.flatIndex >= 0 && t.flatIndex < root.flat.length })
+    var items = root.thumbItems.filter(function(t) {
+      return t && t.flatIndex >= 0 && t.flatIndex < root.flat.length
+        && (root.isMatch(t.flatIndex) || t.flatIndex === root.selectedIndex)
+    })
     var cur = null
     for (var i = 0; i < items.length; i++)
       if (items[i].flatIndex === root.selectedIndex) { cur = items[i]; break }
@@ -724,13 +740,105 @@ Item {
     root.selectionTouched = true
     if (root.flat.length === 0) return
     var n = root.flat.length
-    root.selectedIndex = ((root.selectedIndex + delta) % n + n) % n
+    var i = root.selectedIndex
+    for (var s = 0; s < n; s++) {
+      i = ((i + delta) % n + n) % n
+      if (root.isMatch(i)) { root.selectedIndex = i; return }
+    }
+  }
+
+  // ---- search: typing filters, windows that do not match are dimmed ----------
+  // Every whitespace-separated token must fuzzy-match one of the window's title,
+  // app id, Hyprland class / initialClass or initialTitle.
+  property string query: ""
+  readonly property int matchCount: {
+    var q = root.query, n = 0
+    for (var i = 0; i < root.flat.length; i++)
+      if (root.matches(root.flat[i].toplevel, q)) n++
+    return n
+  }
+
+  function searchFields(toplevel) {
+    if (!toplevel) return []
+    var f = [String(toplevel.title || "")]
+    if (toplevel.wayland && toplevel.wayland.appId) f.push(String(toplevel.wayland.appId))
+    var ipc = root.ipcOf(toplevel)
+    if (ipc) {
+      if (ipc["class"]) f.push(String(ipc["class"]))
+      if (ipc.initialClass) f.push(String(ipc.initialClass))
+      if (ipc.initialTitle) f.push(String(ipc.initialTitle))
+    }
+    return f
+  }
+
+  function wordStart(h, i) { return i === 0 || /[^a-z0-9]/.test(h.charAt(i - 1)) }
+
+  // Score of `needle` (lower case) in `hay`, or -1. Substrings beat scattered
+  // subsequences; word starts and consecutive runs score higher.
+  function fuzzyScore(needle, hay) {
+    var h = hay.toLowerCase()
+    var at = h.indexOf(needle)
+    if (at >= 0) return 1000 + (root.wordStart(h, at) ? 200 : 0) - Math.min(at, 100)
+    var score = 0, j = 0, prev = -2
+    for (var i = 0; i < h.length && j < needle.length; i++) {
+      if (h.charAt(i) !== needle.charAt(j)) continue
+      score += i === prev + 1 ? 10 : root.wordStart(h, i) ? 8 : 1
+      prev = i; j++
+    }
+    return j === needle.length ? score : -1
+  }
+
+  function matchScore(toplevel, query) {
+    var tokens = String(query).toLowerCase().split(/\s+/).filter(function(t) { return t.length > 0 })
+    if (tokens.length === 0) return 0
+    var fields = root.searchFields(toplevel)
+    var total = 0
+    for (var t = 0; t < tokens.length; t++) {
+      var best = -1
+      for (var f = 0; f < fields.length; f++) best = Math.max(best, root.fuzzyScore(tokens[t], fields[f]))
+      if (best < 0) return -1
+      total += best
+    }
+    return total
+  }
+
+  function matches(toplevel, query) { return query === "" || root.matchScore(toplevel, query) >= 0 }
+  function isMatch(index) {
+    return index >= 0 && index < root.flat.length && root.matches(root.flat[index].toplevel, root.query)
+  }
+
+  // Keep a selection the user moved to while it still matches, otherwise jump
+  // to the best match (ties: earlier in the overview).
+  function selectBestMatch() {
+    if (root.query === "") return
+    if (root.selectionTouched && root.isMatch(root.selectedIndex)) return
+    var best = -1, bestScore = -1
+    for (var i = 0; i < root.flat.length; i++) {
+      var sc = root.matchScore(root.flat[i].toplevel, root.query)
+      if (sc > bestScore) { bestScore = sc; best = i }
+    }
+    if (best >= 0) root.selectedIndex = best
+  }
+
+  function setQuery(q) {
+    if (q === root.query) return
+    var narrowing = q.length > root.query.length
+    root.query = q
+    if (!narrowing) root.selectionTouched = root.selectionTouched && root.isMatch(root.selectedIndex)
+    root.selectBestMatch()
   }
 
   function handleKey(event) {
     var k = event.key
     if (root.closing) { if (k === Qt.Key_Escape) root.finishClose(); return true }
-    if (k === Qt.Key_Escape) { root.dismiss(); return true }
+    var mods = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+    if (k === Qt.Key_Escape) { if (root.query !== "") root.setQuery(""); else root.dismiss(); return true }
+    if (k === Qt.Key_Backspace) {
+      if (mods & Qt.ControlModifier) root.setQuery(root.query.replace(/\S*\s*$/, ""))
+      else root.setQuery(root.query.slice(0, -1))
+      return true
+    }
+    if (k === Qt.Key_U && mods === Qt.ControlModifier) { root.setQuery(""); return true }
     // Grid: spatial, by on-screen position. Columns: left/right = other
     // workspace, up/down = within it. Rows: transposed.
     if (root.layoutGrid) {
@@ -746,12 +854,19 @@ Item {
     if (k === Qt.Key_Down) { r ? root.moveSelection(1, 0) : root.moveSelection(0, 1); return true }
     if (k === Qt.Key_Tab) { root.stepSelection(1); return true }
     if (k === Qt.Key_Backtab) { root.stepSelection(-1); return true }
-    if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Space) {
-      root.activate(root.selectedToplevel()); return true
+    if (k === Qt.Key_Return || k === Qt.Key_Enter || (k === Qt.Key_Space && root.query === "")) {
+      if (root.isMatch(root.selectedIndex)) root.activate(root.selectedToplevel())
+      return true
     }
-    if (k >= Qt.Key_0 && k <= Qt.Key_9 && event.modifiers === Qt.NoModifier) {
+    // Digits jump to a workspace until a search is under way, then they are text.
+    if (k >= Qt.Key_0 && k <= Qt.Key_9 && event.modifiers === Qt.NoModifier && root.query === "") {
       var id = k === Qt.Key_0 ? 10 : (k - Qt.Key_0)
       root.focusWorkspaceById(id); return true
+    }
+    var text = String(event.text || "")
+    if (mods === 0 && text.length > 0 && !/[\x00-\x1f\x7f]/.test(text)) {
+      if (root.query === "" && /^\s+$/.test(text)) return true
+      root.setQuery(root.query + text); return true
     }
     return false
   }
@@ -760,7 +875,7 @@ Item {
 
   readonly property var keyNames: ({
     escape: Qt.Key_Escape, left: Qt.Key_Left, right: Qt.Key_Right, up: Qt.Key_Up, down: Qt.Key_Down,
-    tab: Qt.Key_Tab, backtab: Qt.Key_Backtab, "return": Qt.Key_Return, enter: Qt.Key_Enter, space: Qt.Key_Space,
+    tab: Qt.Key_Tab, backtab: Qt.Key_Backtab, backspace: Qt.Key_Backspace, "return": Qt.Key_Return, enter: Qt.Key_Enter, space: Qt.Key_Space,
     "0": Qt.Key_0, "1": Qt.Key_1, "2": Qt.Key_2, "3": Qt.Key_3, "4": Qt.Key_4,
     "5": Qt.Key_5, "6": Qt.Key_6, "7": Qt.Key_7, "8": Qt.Key_8, "9": Qt.Key_9
   })
@@ -769,7 +884,14 @@ Item {
   function press(name) {
     var key = root.keyNames[String(name || "").toLowerCase()]
     if (key === undefined) return "unknown key: " + name
-    return root.handleKey({ key: key, modifiers: Qt.NoModifier }) ? "ok" : "ignored"
+    return root.handleKey({ key: key, modifiers: Qt.NoModifier, text: "" }) ? "ok" : "ignored"
+  }
+
+  // Type text into the search as if it were typed (`call git-spren.overview type "fire"`).
+  function type(text) {
+    if (!root.opened || root.closing) return "ignored"
+    root.setQuery(root.query + String(text || ""))
+    return "ok"
   }
 
   // Current model as JSON (for debugging; "state" is taken by Item).
@@ -779,6 +901,7 @@ Item {
         workspace: c.label, monitor: c.sub,
         windows: c.toplevels.map(function(t) {
           return { title: t.title, address: t.address, active: root.isActive(t),
+                   matched: root.matches(t, root.query),
                    fly: root.flySource(t),
                    appId: t.wayland ? t.wayland.appId : null }
         })
@@ -787,6 +910,7 @@ Item {
     return JSON.stringify({ opened: root.opened, closing: root.closing,
                             closeTarget: root.closeTarget ? (root.closeTarget.workspace.id + ":" + (root.closeTarget.toplevel ? root.closeTarget.toplevel.title : "")) : null,
                             selectedIndex: root.selectedIndex,
+                            query: root.query, matchCount: root.matchCount,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
@@ -942,6 +1066,65 @@ Item {
               groupWidth: root.layoutGrid ? root.gridMetrics.boxW : root.layoutRows ? root.rowWidth : root.columnWidth
               groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
             }
+          }
+        }
+      }
+
+      // Search field: appears once you type, centred in the top margin.
+      Rectangle {
+        id: searchPill
+        readonly property bool shown: root.query !== ""
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.max(Style.space(8), (root.outerMargin - height) / 2)
+        width: Math.min(parent.width - Style.space(32), Math.max(Style.space(280), searchRow.implicitWidth + Style.space(32)))
+        height: searchRow.implicitHeight + Style.space(14)
+        radius: height / 2
+        color: Util.alpha(root.surface, 0.92)
+        border.width: Math.max(1, Style.space(1))
+        border.color: root.matchCount === 0 ? root.urgent : root.selectedBorderColor
+        opacity: (shown ? 1 : 0) * root.closeOpacity * root.chromeOpacity
+        visible: opacity > 0
+        Behavior on opacity { enabled: !root.closing; NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
+
+        Row {
+          id: searchRow
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(16)
+          anchors.rightMargin: Style.space(16)
+          spacing: Style.space(10)
+
+          Text {
+            id: queryText
+            width: Math.min(implicitWidth + caret.width + Style.space(2), searchRow.width - countText.implicitWidth - searchRow.spacing * 2)
+            rightPadding: caret.width + Style.space(2)
+            text: root.query
+            elide: Text.ElideLeft
+            color: root.text
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title
+
+            // Caret right after the last glyph (a Row sibling would get the row spacing).
+            Rectangle {
+              id: caret
+              x: Math.min(queryText.contentWidth, queryText.width - queryText.rightPadding) + Style.space(1)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Math.max(2, Style.space(2)); height: queryText.implicitHeight * 0.8
+              color: root.text
+            }
+          }
+          Item {
+            width: Math.max(0, searchRow.width - queryText.width - countText.implicitWidth - searchRow.spacing * 2)
+            height: 1
+          }
+          Text {
+            id: countText
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.matchCount === 0 ? "no match" : root.matchCount + " / " + root.flat.length
+            color: root.matchCount === 0 ? root.urgent : root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
         }
       }
