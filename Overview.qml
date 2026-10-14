@@ -588,6 +588,21 @@ Item {
 
   // ---- actions -----------------------------------------------------------
 
+  // Quote a value as a Lua string literal for the Lua-mode dispatcher.
+  // execDetached skips the shell, but Hyprland still parses the argument as
+  // Lua, and special workspace names are free text, so `"`, `\\` and every
+  // control character (incl. newlines, which would also end the hyprctl
+  // request) are escaped as \ddd (three digits so a following digit cannot
+  // be absorbed).
+  function luaString(value) {
+    var s = String(value === undefined || value === null ? "" : value)
+    return "\"" + s.replace(/[\\"\x00-\x1f\x7f]/g, function(c) {
+      if (c === "\\") return "\\\\"
+      if (c === "\"") return "\\\""
+      return "\\" + ("00" + c.charCodeAt(0)).slice(-3)
+    }) + "\""
+  }
+
   // Hyprland ignores foreign-toplevel activate requests unless
   // misc:focus_on_activate is set, so focus through the dispatcher instead.
   function activate(toplevel) {
@@ -595,7 +610,7 @@ Item {
     var addr = String(toplevel.address || "")
     if (addr.length > 0) {
       if (addr.indexOf("0x") !== 0) addr = "0x" + addr
-      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"address:" + addr + "\" })"])
+      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"])
     } else if (toplevel.wayland) {
       toplevel.wayland.activate()
     } else if (toplevel.workspace) {
@@ -615,7 +630,7 @@ Item {
   function focusWorkspace(workspace, dismissAfter) {
     if (!workspace) return
     var target = workspace.id > 0 ? String(workspace.id) : String(workspace.name)
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + target + "\" })"])
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(target) + " })"])
     if (dismissAfter !== false) root.closeToward({ workspace: workspace, toplevel: null })
   }
 
@@ -623,7 +638,7 @@ Item {
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++)
       if (all[i].id === id) { root.focusWorkspace(all[i]); return }
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + id + "\" })"])
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(id) + " })"])
     root.dismissNow()
   }
 
