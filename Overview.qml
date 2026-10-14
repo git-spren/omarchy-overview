@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
@@ -39,6 +40,50 @@ Item {
   readonly property color muted: Color.muted
   readonly property int cornerRadius: Style.cornerRadius
   readonly property string fontFamily: Style.font.menuFamily
+
+  // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
+  //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
+  //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
+  readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
+  property var settings: ({})
+  readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
+  readonly property real selectedZoom: {
+    var z = root.settings.zoom
+    if (typeof z === "number" && z >= 1 && z <= 2) return z
+    var key = String(z || "medium").toLowerCase()
+    return root.zoomLevels[key] !== undefined ? root.zoomLevels[key] : root.zoomLevels.medium
+  }
+  readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
+
+  function colorSetting(value, fallback) {
+    var v = String(value || "").trim().toLowerCase()
+    if (!v || v === "accent") return root.accent
+    if (v === "selected") return Color.menu.selectedBorder
+    if (v === "foreground") return Color.foreground
+    if (v === "urgent") return root.urgent
+    if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(v)) return v
+    console.warn("git-spren.overview: unknown selectedBorder value", value, "- using accent")
+    return fallback
+  }
+
+  function applySettings(raw) {
+    var text = String(raw || "").trim()
+    if (!text) { root.settings = ({}); return }
+    try {
+      var parsed = JSON.parse(text)
+      root.settings = (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : ({})
+    } catch (e) {
+      console.warn("git-spren.overview: cannot parse " + root.settingsPath + ":", e)
+    }
+  }
+
+  FileView {
+    path: root.settingsPath
+    watchChanges: true
+    onLoaded: root.applySettings(text())
+    onFileChanged: reload()
+    onLoadFailed: function(error) { root.settings = ({}) }   // no file = defaults
+  }
 
   // Layout knobs (all in shell-scaled px).
   readonly property int outerMargin: Style.space(56)
@@ -287,7 +332,9 @@ Item {
         })
       }
     })
-    return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex, columns: cols })
+    return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
+                            zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
+                            columns: cols })
   }
 
   // ---- plumbing ----------------------------------------------------------

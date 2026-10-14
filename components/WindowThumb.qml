@@ -21,7 +21,8 @@ Item {
 
   readonly property real borderWidth: Math.max(2, Style.space(2))
   readonly property real selectedBorderWidth: Math.max(3, Style.space(3))
-  readonly property real selectedZoom: 1.1
+  readonly property real selectedZoom: overview ? overview.selectedZoom : 1.1
+  readonly property color selectedColor: overview ? overview.selectedBorderColor : "white"
 
   // Aspect: real frame once captured, else Hyprland's reported size, else 16:9.
   readonly property real fallbackAspect: {
@@ -51,9 +52,9 @@ Item {
     // Selected: zoomed, raised above its neighbours, theme accent border.
     // Active (the window you came from) keeps a dimmer accent so it stays findable.
     border.width: thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
-    border.color: thumb.selected ? overview.accent
+    border.color: thumb.selected ? thumb.selectedColor
       : thumb.urgent ? overview.urgent
-      : thumb.active ? Util.alpha(overview.accent, 0.55)
+      : thumb.active ? Util.alpha(thumb.selectedColor, 0.55)
       : overview.borderColor
     Behavior on border.color { ColorAnimation { duration: 120 } }
     scale: thumb.selected ? thumb.selectedZoom : 1
