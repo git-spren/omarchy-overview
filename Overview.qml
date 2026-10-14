@@ -110,6 +110,10 @@ Item {
   property bool closing: false
   // Headers / zebra bands fade out with the "current" reverse animation.
   property real chromeOpacity: 1
+  // Whole-overlay fade over the second half of the close, so the thumbnails
+  // vanish while still settling instead of sitting still and then snapping.
+  property real closeOpacity: 1
+  readonly property int closeMs: Math.round(root.animationMs * 0.9)
   // Set when closing because a window / workspace was chosen: the reverse
   // animation then lands on that workspace instead of the one we came from.
   // { workspace: HyprlandWorkspace, toplevel: HyprlandToplevel | null }
@@ -281,11 +285,12 @@ Item {
       root.flyPhase = 3
       chromeOutAnim.start()
     }
+    closeFadeAnim.start()
     closeTimer.restart()
   }
 
   function finishClose() {
-    closeTimer.stop(); zoomAnim.stop(); zoomOutAnim.stop(); chromeOutAnim.stop()
+    closeTimer.stop(); zoomAnim.stop(); zoomOutAnim.stop(); chromeOutAnim.stop(); closeFadeAnim.stop()
     flyTimer.stop(); flyEndTimer.stop()
     root.opened = false
     root.closing = false
@@ -293,6 +298,7 @@ Item {
     root.flying = false
     root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0; root.zoomScrim = 1
     root.chromeOpacity = 1
+    root.closeOpacity = 1
     root.closeTarget = null
   }
 
@@ -792,7 +798,13 @@ Item {
   }
   Timer { id: flyEndTimer; interval: root.animationMs + 80; onTriggered: root.flying = false }
 
-  Timer { id: closeTimer; interval: root.animationMs + 40; onTriggered: root.finishClose() }
+  Timer { id: closeTimer; interval: root.closeMs + 10; onTriggered: root.finishClose() }
+
+  SequentialAnimation {
+    id: closeFadeAnim
+    PauseAnimation { duration: Math.round(root.animationMs * 0.5) }
+    NumberAnimation { target: root; property: "closeOpacity"; to: 0; duration: root.closeMs - Math.round(root.animationMs * 0.5); easing.type: Easing.InOutQuad }
+  }
 
   ParallelAnimation {
     id: zoomOutAnim
@@ -843,14 +855,14 @@ Item {
     Rectangle {
       anchors.fill: parent
       color: root.scrim
-      opacity: root.zoomScrim
+      opacity: root.zoomScrim * root.closeOpacity
     }
 
     // Extra dimming so thumbnails read against a busy desktop.
     Rectangle {
       anchors.fill: parent
       color: Util.alpha(Color.background, 0.55)
-      opacity: root.zoomScrim
+      opacity: root.zoomScrim * root.closeOpacity
     }
 
     MouseArea {
@@ -869,8 +881,8 @@ Item {
         id: content
         anchors.fill: parent
         // "all": stay hidden until the zoom starts (phase 2), then appear at once.
-        opacity: root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0
-        Behavior on opacity { enabled: !root.animateAll; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        opacity: (root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0) * root.closeOpacity
+        Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         transform: [
           Scale { origin.x: 0; origin.y: 0; xScale: root.zoomScale; yScale: root.zoomScale },
           Translate { x: root.zoomTX; y: root.zoomTY }
