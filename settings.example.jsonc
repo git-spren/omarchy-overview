@@ -30,11 +30,18 @@
   //   "#rrggbb"     any hex colour (#rgb, #rgba and #rrggbbaa work too)
   "selectedBorder": "accent",
 
-  // Fly-in on open: windows of the current workspace start at their real place
-  // on screen and glide into their slot; everything else fades in.
-  //   true / false
-  "animate": true,
+  // Opening animation.
+  //   "current"  windows of the current workspace start at their real place on
+  //              screen and glide into their thumbnail slot; everything else
+  //              fades in  (true means the same)
+  //   "all"      the whole overview is first drawn around the live desktop at
+  //              1:1 and then zooms into view. In the grid layout the current
+  //              workspace's box starts exactly over the real screen; in the
+  //              columns and rows layouts the active window's thumbnail starts
+  //              over the real window. The dimming fades in with the zoom.
+  //   "none"     no animation  (false means the same)
+  "animate": "current",
 
-  // Length of that flight in milliseconds, 60 to 1000.
+  // Length of that animation in milliseconds, 60 to 1000.
   "animationDuration": 240
 }

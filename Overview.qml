@@ -59,9 +59,13 @@ Item {
   //                   left-aligned; more than three workspaces wrap into two columns) |
   //                   "grid" (a box per workspace replicating the monitor, windows at
   //                   their real position and size)
-  //   animate:        true | false  (default true) - windows of the current workspace fly
-  //                   from their real place on screen into their thumbnail slot
-  //   animationDuration: milliseconds for that flight (default 240, 60-1000)
+  //   animate:        "current" (default; true) - windows of the current workspace fly
+  //                   from their real place on screen into their thumbnail slot |
+  //                   "all" - the whole overview is drawn around the live desktop at
+  //                   1:1 (grid: the current workspace's box over the real screen;
+  //                   columns/rows: the active window's thumbnail over the real
+  //                   window) and zooms into view | "none" (false)
+  //   animationDuration: milliseconds for that animation (default 240, 60-1000)
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -78,7 +82,20 @@ Item {
   }
   readonly property bool layoutRows: root.layoutMode === "rows"
   readonly property bool layoutGrid: root.layoutMode === "grid"
-  readonly property bool animate: root.settings.animate !== false
+  readonly property string animateMode: {
+    var v = root.settings.animate
+    if (v === undefined || v === null || v === true) return "current"
+    if (v === false) return "none"
+    var s = String(v).trim().toLowerCase()
+    if (s === "current" || s === "all" || s === "none") return s
+    if (s === "true" || s === "on") return "current"
+    if (s === "false" || s === "off") return "none"
+    console.warn("git-spren.overview: unknown animate value", v, "- using current")
+    return "current"
+  }
+  readonly property bool animate: root.animateMode !== "none"
+  readonly property bool animateCurrent: root.animateMode === "current"
+  readonly property bool animateAll: root.animateMode === "all"
   readonly property int animationMs: {
     var v = Number(root.settings.animationDuration)
     return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 240
@@ -88,6 +105,14 @@ Item {
   // fresh window geometry), 2 thumbnails flying / shown.
   property int flyPhase: 0
   property bool flying: false
+  // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
+  property real zoomScale: 1
+  property real zoomTX: 0
+  property real zoomTY: 0
+  property real zoomScrim: 1
+  // ms spent waiting (after the 45 ms geometry wait) for the current
+  // workspace's captures, so the 1:1 start frame shows real content.
+  property int flyWaited: 0
 
   function colorSetting(value, fallback) {
     var v = String(value || "").trim().toLowerCase()
@@ -220,6 +245,7 @@ Item {
     root.selectedIndex = -1
     root.rebuild()
     root.flyPhase = root.animate ? 1 : 2
+    root.flyWaited = 0
     root.opened = true
     if (root.animate) flyTimer.restart()
     // IPC data (window positions) arrives a moment later; re-sort once it does.
@@ -233,6 +259,8 @@ Item {
     root.flying = false
     flyTimer.stop()
     flyEndTimer.stop()
+    zoomAnim.stop()
+    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0; root.zoomScrim = 1
   }
 
   function dismiss() {
@@ -342,6 +370,83 @@ Item {
     var my = typeof mon.y === "number" ? mon.y : 0
     if (ipc.size[0] <= 0 || ipc.size[1] <= 0) return null
     return { x: ipc.at[0] - mx, y: ipc.at[1] - my, w: ipc.size[0], h: ipc.size[1] }
+  }
+
+  // ---- "all" animation: the overview starts drawn around the live desktop ----
+
+  // Index of the group for the workspace shown on the overlay's monitor.
+  function homeGroupIndex() {
+    var mon = Hyprland.focusedMonitor
+    for (var g = 0; g < root.groups.length; g++) {
+      var ws = root.groups[g].workspace
+      if (ws && ws.focused) return g
+    }
+    for (var h = 0; h < root.groups.length; h++) {
+      var w = root.groups[h].workspace
+      if (w && w.active && w.monitor && mon && w.monitor.name === mon.name) return h
+    }
+    return -1
+  }
+
+  // Which on-screen rectangle (`from`, scene coords, identity transform) should
+  // start out covering which real rectangle (`to`): the current workspace's box
+  // over the whole monitor in the grid layout, otherwise the active window's
+  // thumbnail over the real window, otherwise the current group filling the screen.
+  function zoomAnchor() {
+    var gi = root.homeGroupIndex()
+    var item = gi >= 0 ? groupRepeater.itemAt(gi) : null
+    if (!item) return null
+    if (root.layoutGrid) {
+      var r = item.replicaRegion()
+      return r && r.w > 0 ? { from: r, to: { x: 0, y: 0, w: panel.width, h: panel.height } } : null
+    }
+    for (var i = 0; i < root.thumbItems.length; i++) {
+      var t = root.thumbItems[i]
+      if (!t || t.flatIndex < 0 || t.flatIndex >= root.flat.length) continue
+      var tl = root.flat[t.flatIndex].toplevel
+      if (!root.isActive(tl)) continue
+      var src = root.flySource(tl)
+      var fg = t.frameGeometry()
+      if (src && fg.w > 0) return { from: fg, to: src }
+      break
+    }
+    var gr = item.sceneRect()
+    if (gr.w <= 0 || gr.h <= 0) return null
+    var s = Math.min(panel.width / gr.w, panel.height / gr.h)
+    return { from: gr, to: { x: (panel.width - gr.w * s) / 2, y: (panel.height - gr.h * s) / 2, w: gr.w * s, h: gr.h * s } }
+  }
+
+  function homeThumbsReady() {
+    var gi = root.homeGroupIndex()
+    if (gi < 0) return true
+    for (var i = 0; i < root.thumbItems.length; i++) {
+      var t = root.thumbItems[i]
+      if (!t || t.flatIndex < 0 || t.flatIndex >= root.flat.length) continue
+      if (root.flat[t.flatIndex].group === gi && !t.hasContent) return false
+    }
+    return true
+  }
+
+  function startZoomAll() {
+    zoomAnim.stop()
+    root.zoomScale = 1; root.zoomTX = 0; root.zoomTY = 0
+    var a = root.zoomAnchor()
+    var s, cx, cy
+    if (a) {
+      s = a.to.w / a.from.w
+      cx = a.to.x + a.to.w / 2 - (a.from.x + a.from.w / 2) * s
+      cy = a.to.y + a.to.h / 2 - (a.from.y + a.from.h / 2) * s
+    } else {
+      // Nothing to anchor on (empty current workspace): a gentle zoom from the centre.
+      s = 1.08
+      cx = (1 - s) * panel.width / 2
+      cy = (1 - s) * panel.height / 2
+    }
+    root.zoomScale = s
+    root.zoomTX = cx
+    root.zoomTY = cy
+    root.zoomScrim = 0
+    zoomAnim.start()
   }
 
   // Called with scene coordinates on every pointer move over a thumbnail.
@@ -545,15 +650,38 @@ Item {
     return JSON.stringify({ opened: root.opened, selectedIndex: root.selectedIndex,
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
-                            animate: root.animate, animationDuration: root.animationMs,
+                            animate: root.animateMode, animationDuration: root.animationMs,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
   // ---- plumbing ----------------------------------------------------------
 
   Timer { id: settleTimer; interval: 180; onTriggered: root.rebuild() }
-  Timer { id: flyTimer; interval: 45; onTriggered: if (root.opened) { root.flying = true; root.flyPhase = 2; flyEndTimer.restart() } }
+  Timer {
+    id: flyTimer; interval: 45
+    onTriggered: if (root.opened) {
+      if (root.animateAll && root.flyWaited < 300 && !root.homeThumbsReady()) {
+        root.flyWaited += 30
+        flyTimer.interval = 30
+        flyTimer.restart()
+        return
+      }
+      flyTimer.interval = 45
+      root.flying = root.animateCurrent
+      root.flyPhase = 2
+      if (root.animateAll) root.startZoomAll()
+      flyEndTimer.restart()
+    }
+  }
   Timer { id: flyEndTimer; interval: root.animationMs + 80; onTriggered: root.flying = false }
+
+  ParallelAnimation {
+    id: zoomAnim
+    NumberAnimation { target: root; property: "zoomScale"; to: 1; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomTX"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomTY"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 1; duration: root.animationMs; easing.type: Easing.OutCubic }
+  }
   Timer { id: refreshTimer; interval: 120; onTriggered: Hyprland.refreshToplevels() }
   Timer { id: rebuildTimer; interval: 60; onTriggered: { Hyprland.refreshToplevels(); root.rebuild() } }
 
@@ -580,12 +708,14 @@ Item {
     Rectangle {
       anchors.fill: parent
       color: root.scrim
+      opacity: root.zoomScrim
     }
 
     // Extra dimming so thumbnails read against a busy desktop.
     Rectangle {
       anchors.fill: parent
       color: Util.alpha(Color.background, 0.55)
+      opacity: root.zoomScrim
     }
 
     MouseArea {
@@ -603,8 +733,13 @@ Item {
       Item {
         id: content
         anchors.fill: parent
-        opacity: root.opened ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        // "all": stay hidden until the zoom starts (phase 2), then appear at once.
+        opacity: root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0
+        Behavior on opacity { enabled: !root.animateAll; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        transform: [
+          Scale { origin.x: 0; origin.y: 0; xScale: root.zoomScale; yScale: root.zoomScale },
+          Translate { x: root.zoomTX; y: root.zoomTY }
+        ]
 
         Text {
           visible: root.groupCount === 0
@@ -631,6 +766,7 @@ Item {
           horizontalItemAlignment: root.layoutRows ? Grid.AlignLeft : Grid.AlignHCenter
 
           Repeater {
+            id: groupRepeater
             model: root.groups
 
             WorkspaceGroup {

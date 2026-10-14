@@ -41,6 +41,16 @@ Item {
   readonly property real contentHeight: rows ? thumbBoxHeight + overview.captionHeight : 0
   readonly property real headerH: grid ? overview.gridHeaderHeight : overview.headerHeight
 
+  // Scene rectangles for the "all" animation (measured with the identity transform).
+  function replicaRegion() {
+    var p = replica.mapToItem(null, 0, 0)
+    return { x: p.x, y: p.y, w: replica.width, h: replica.height }
+  }
+  function sceneRect() {
+    var p = group.mapToItem(null, 0, 0)
+    return { x: p.x, y: p.y, w: group.width, h: group.height }
+  }
+
   width: groupWidth
   height: grid ? headerH + replicaHeight
         : rows ? contentHeight

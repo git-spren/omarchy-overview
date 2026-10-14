@@ -21,6 +21,7 @@ Item {
   readonly property bool urgent: toplevel !== null && toplevel.urgent
   readonly property string title: toplevel ? String(toplevel.title || (toplevel.wayland ? toplevel.wayland.appId : "") || "") : ""
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
+  readonly property bool hasContent: view.hasContent
 
   readonly property real borderWidth: Math.max(2, Style.space(2))
   readonly property real selectedBorderWidth: Math.max(3, Style.space(3))
@@ -62,15 +63,20 @@ Item {
   Component.onCompleted: if (overview) overview.registerThumb(thumb)
   Component.onDestruction: if (overview) overview.unregisterThumb(thumb)
 
+  // Frame rectangle in scene coordinates, including the selection zoom.
   function frameGeometry() {
     var p = frame.mapToItem(null, 0, 0)
-    return { x: p.x, y: p.y, w: frame.width, h: frame.height,
-             cx: p.x + frame.width / 2, cy: p.y + frame.height / 2 }
+    var q = frame.mapToItem(null, frame.width, frame.height)
+    var w = q.x - p.x, h = q.y - p.y
+    return { x: p.x, y: p.y, w: w, h: h, cx: p.x + w / 2, cy: p.y + h / 2 }
   }
 
+  // "current": fly from the real window. "all" / "none": just show (the "all"
+  // zoom is applied to the whole overview by Overview.qml).
   function startFly() {
     flyAnim.stop(); fadeAnim.stop()
-    var src = overview && overview.animate ? overview.flySource(thumb.toplevel) : null
+    thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
+    var src = overview && overview.animateCurrent ? overview.flySource(thumb.toplevel) : null
     if (src && frame.width > 0 && frame.height > 0) {
       // Frame starts exactly over the real window, then settles into its slot.
       var g = frame.mapToItem(null, 0, 0)
@@ -82,9 +88,8 @@ Item {
       thumb.opacity = 1
       flyAnim.start()
     } else {
-      thumb.flyDX = 0; thumb.flyDY = 0; thumb.flySX = 1; thumb.flySY = 1
       thumb.captionOpacity = 1
-      if (overview && overview.animate) fadeAnim.start()
+      if (overview && overview.animateCurrent) fadeAnim.start()
       else thumb.opacity = 1
     }
   }
