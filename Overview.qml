@@ -1100,6 +1100,7 @@ Item {
             width: Math.min(implicitWidth + caret.width + Style.space(2), searchRow.width - countText.implicitWidth - searchRow.spacing * 2)
             rightPadding: caret.width + Style.space(2)
             text: root.query
+            textFormat: Text.PlainText
             elide: Text.ElideLeft
             color: root.text
             font.family: root.fontFamily

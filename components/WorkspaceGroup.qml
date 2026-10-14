@@ -101,6 +101,7 @@ Item {
 
       Text {
         text: group.entry ? group.entry.label : ""
+        textFormat: Text.PlainText
         color: group.focusedWorkspace ? overview.accent : overview.text
         font.family: overview.fontFamily
         font.pixelSize: group.rows ? Style.font.display : (group.grid ? Style.font.title : Style.font.heading)
@@ -110,6 +111,7 @@ Item {
       Text {
         visible: text.length > 0
         text: group.entry ? group.entry.sub : ""
+        textFormat: Text.PlainText
         color: overview.muted
         font.family: overview.fontFamily
         font.pixelSize: Style.font.caption

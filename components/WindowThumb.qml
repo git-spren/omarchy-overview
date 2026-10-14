@@ -244,6 +244,9 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: Math.min(implicitWidth, frame.width - Style.space(50))
         text: thumb.title
+        // Titles are set by the app (any web page): AutoText would render
+        // markup in them, and an <img src="http://..."> would be fetched.
+        textFormat: Text.PlainText
         elide: Text.ElideRight
         color: overview.text
         font.family: overview.fontFamily
@@ -274,6 +277,7 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       width: Math.min(implicitWidth, thumb.width - Style.space(16) - Style.space(6))
       text: thumb.title
+      textFormat: Text.PlainText
       elide: Text.ElideRight
       color: thumb.selected ? overview.text : overview.muted
       font.family: overview.fontFamily
