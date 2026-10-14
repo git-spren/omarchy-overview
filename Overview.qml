@@ -44,7 +44,8 @@ Item {
   // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
-  //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace)
+  //   layout:         "columns" (one column per workspace) | "rows" (one row per workspace,
+  //                   left-aligned; more than three workspaces wrap into two columns)
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -109,8 +110,12 @@ Item {
   readonly property int groupCount: root.groups.length
   readonly property real columnWidth: groupCount === 0 ? 0
     : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (groupCount - 1)) / groupCount))
+  // Rows layout: more than three workspaces wrap into two columns, filled top to bottom.
+  readonly property int rowColumns: root.layoutRows && groupCount > 3 ? 2 : 1
+  readonly property int rowsPerColumn: groupCount === 0 ? 0 : Math.ceil(groupCount / rowColumns)
+  readonly property real rowWidth: (availWidth - columnGap * (rowColumns - 1)) / rowColumns
   readonly property real rowHeight: groupCount === 0 ? 0
-    : Math.max(minRowHeight, Math.min(maxRowHeight, (availHeight - rowGap * (groupCount - 1)) / groupCount))
+    : Math.max(minRowHeight, Math.min(maxRowHeight, (availHeight - rowGap * (rowsPerColumn - 1)) / rowsPerColumn))
 
   // ---- host contract -----------------------------------------------------
 
@@ -418,11 +423,13 @@ Item {
         Grid {
           id: groupsGrid
           anchors.centerIn: parent
-          columns: root.layoutRows ? 1 : Math.max(1, root.groupCount)
+          columns: root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
+          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn) : 1
+          flow: root.layoutRows ? Grid.TopToBottom : Grid.LeftToRight
           columnSpacing: root.columnGap
           rowSpacing: root.rowGap
           verticalItemAlignment: root.layoutRows ? Grid.AlignVCenter : Grid.AlignTop
-          horizontalItemAlignment: Grid.AlignHCenter
+          horizontalItemAlignment: root.layoutRows ? Grid.AlignLeft : Grid.AlignHCenter
 
           Repeater {
             model: root.groups
@@ -432,7 +439,7 @@ Item {
               overview: root
               entry: modelData
               rows: root.layoutRows
-              groupWidth: root.layoutRows ? root.availWidth : root.columnWidth
+              groupWidth: root.layoutRows ? root.rowWidth : root.columnWidth
               groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
             }
           }

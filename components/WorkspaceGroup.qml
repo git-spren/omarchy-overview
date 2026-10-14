@@ -27,7 +27,7 @@ Item {
         (groupWidth - overview.headerWidth - gap * (count - 1)) / count))
     : groupWidth)
 
-  // Rows: header pinned left, thumbnails centred in the remaining width.
+  // Rows: header pinned left, thumbnails left-aligned after it.
   // Columns: header on top, thumbnails stacked below.
   readonly property real contentHeight: rows ? thumbBoxHeight + overview.captionHeight : 0
   width: groupWidth
@@ -94,7 +94,7 @@ Item {
     columnSpacing: group.gap
     verticalItemAlignment: Grid.AlignVCenter
     horizontalItemAlignment: Grid.AlignHCenter
-    x: group.rows ? overview.headerWidth + Math.max(0, (group.groupWidth - overview.headerWidth - width) / 2) : 0
+    x: group.rows ? overview.headerWidth : 0
     y: group.rows ? 0 : overview.headerHeight + group.gap
 
     Repeater {
