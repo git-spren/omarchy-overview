@@ -9,6 +9,7 @@ Item {
   property var overview: null
   property var entry: null          // { workspace, label, sub, toplevels, firstIndex }
   property bool rows: false
+  property int groupIndex: 0
   property real groupWidth: 300     // columns: column width; rows: full available width
   property real groupHeight: 600    // columns: available height; rows: row height
 
@@ -31,9 +32,22 @@ Item {
   // Columns: header on top, thumbnails stacked below.
   readonly property real contentHeight: rows ? thumbBoxHeight + overview.captionHeight : 0
   width: groupWidth
-  height: rows ? contentHeight : overview.headerHeight + gap + thumbs.height
+  // Columns take the full available height so the zebra bands are uniform.
+  height: rows ? contentHeight : groupHeight
   implicitWidth: width
   implicitHeight: height
+
+  // Very faint zebra band on every other group; extends half a gap on each
+  // side so neighbouring bands meet.
+  Rectangle {
+    visible: group.groupIndex % 2 === 1
+    x: group.rows ? -overview.columnGap / 2 : -overview.columnGap / 2
+    y: group.rows ? -overview.rowGap / 2 : -overview.rowGap / 2
+    width: parent.width + overview.columnGap
+    height: parent.height + overview.rowGap
+    radius: overview.cornerRadius
+    color: overview.zebraColor
+  }
 
   Item {
     id: header

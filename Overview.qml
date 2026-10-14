@@ -40,6 +40,7 @@ Item {
   readonly property color muted: Color.muted
   readonly property int cornerRadius: Style.cornerRadius
   readonly property string fontFamily: Style.font.menuFamily
+  readonly property color zebraColor: Util.alpha(Color.foreground, 0.045)
 
   // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
@@ -282,17 +283,20 @@ Item {
   // ---- keyboard ----------------------------------------------------------
 
   // dGroup moves to the neighbouring workspace group, dItem within the group.
+  // Both axes wrap around.
   function moveSelection(dGroup, dItem) {
     if (root.flat.length === 0) return
     if (root.selectedIndex < 0) { root.selectedIndex = 0; return }
     var cur = root.flat[root.selectedIndex]
     var g = cur.group, i = cur.item
+    var n = root.groups.length
     if (dGroup !== 0) {
-      g = Math.max(0, Math.min(root.groups.length - 1, g + dGroup))
+      g = ((g + dGroup) % n + n) % n
       i = Math.min(i, root.groups[g].toplevels.length - 1)
     }
     if (dItem !== 0) {
-      i = Math.max(0, Math.min(root.groups[g].toplevels.length - 1, i + dItem))
+      var m = root.groups[g].toplevels.length
+      i = ((i + dItem) % m + m) % m
     }
     root.selectedIndex = root.groups[g].firstIndex + i
   }
@@ -436,8 +440,10 @@ Item {
 
             WorkspaceGroup {
               required property var modelData
+              required property int index
               overview: root
               entry: modelData
+              groupIndex: index
               rows: root.layoutRows
               groupWidth: root.layoutRows ? root.rowWidth : root.columnWidth
               groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
