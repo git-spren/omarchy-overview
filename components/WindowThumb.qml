@@ -19,6 +19,7 @@ Item {
   readonly property bool selected: overview !== null && overview.selectedIndex === flatIndex
   readonly property bool active: overview !== null && overview.isActive(toplevel)
   readonly property bool urgent: toplevel !== null && toplevel.urgent
+  readonly property bool closing: overview !== null && overview.closing
   // Redacted (Hyprland tag overview-redact): black box, no capture, app name only.
   readonly property bool redacted: overview !== null && overview.isRedacted(toplevel)
   readonly property string title: !toplevel ? ""
@@ -170,10 +171,12 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
     y: (thumb.boxHeight - height) / 2
     radius: overview.cornerRadius
-    color: overview.surface
+    // While closing, borders and the frame fill drop at once so the windows land
+    // on the desktop as bare content (the frame size is unchanged).
+    color: thumb.closing ? "transparent" : overview.surface
     // Selected: zoomed, raised above its neighbours, theme accent border.
     // Active (the window you came from) keeps a dimmer accent so it stays findable.
-    border.width: thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
+    border.width: thumb.closing ? 0 : thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
     border.color: thumb.selected ? thumb.selectedColor
       : thumb.urgent ? overview.urgent
       : thumb.active ? Util.alpha(thumb.selectedColor, 0.55)
