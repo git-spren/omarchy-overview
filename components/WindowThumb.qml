@@ -235,7 +235,7 @@ Item {
   // Overlay caption for the exact (grid) mode: shown on the selected window, and
   // on every match while searching.
   Rectangle {
-    visible: thumb.exact && (thumb.selected || (overview.query !== "" && thumb.matched))
+    visible: thumb.exact && !thumb.closing && (thumb.selected || (overview.query !== "" && thumb.matched))
     anchors.bottom: frame.bottom
     anchors.horizontalCenter: frame.horizontalCenter
     anchors.bottomMargin: thumb.borderWidth + Style.space(4)
@@ -273,7 +273,7 @@ Item {
   }
 
   Row {
-    visible: !thumb.exact
+    visible: !thumb.exact && !thumb.closing
     anchors.top: frame.bottom
     anchors.topMargin: Style.space(6)
     anchors.horizontalCenter: parent.horizontalCenter

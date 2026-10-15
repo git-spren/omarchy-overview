@@ -62,8 +62,10 @@ Item {
   implicitHeight: height
 
   // Very faint zebra band on every other group (columns/rows) or box tint (grid).
+  // Tint, outline and header all drop when the close starts so the zoom lands
+  // on bare windows.
   Rectangle {
-    visible: group.grid || group.groupIndex % 2 === 1
+    visible: (group.grid || group.groupIndex % 2 === 1) && !overview.closing
     x: group.grid ? 0 : -overview.columnGap / 2
     y: group.grid ? 0 : -overview.rowGap / 2
     width: group.grid ? parent.width : parent.width + overview.columnGap
@@ -84,6 +86,7 @@ Item {
     width: group.rows ? overview.headerWidth - group.gap : group.groupWidth
     height: group.rows ? group.contentHeight : group.headerH
     opacity: overview.chromeOpacity
+    visible: !overview.closing
 
     Rectangle {
       anchors.fill: parent
