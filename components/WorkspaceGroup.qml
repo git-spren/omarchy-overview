@@ -62,20 +62,23 @@ Item {
   implicitHeight: height
 
   // Very faint zebra band on every other group (columns/rows) or box tint (grid).
-  // Tint, outline and header all drop when the close starts so the zoom lands
-  // on bare windows.
+  // Tint and header drop when the close starts so the zoom lands on the windows;
+  // the (faint) outline stays.
   Rectangle {
-    visible: (group.grid || group.groupIndex % 2 === 1) && !overview.closing
+    visible: group.grid || group.groupIndex % 2 === 1
     x: group.grid ? 0 : -overview.columnGap / 2
     y: group.grid ? 0 : -overview.rowGap / 2
     width: group.grid ? parent.width : parent.width + overview.columnGap
     height: group.grid ? parent.height : parent.height + overview.rowGap
     radius: overview.cornerRadius
     opacity: overview.chromeOpacity
-    color: group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
+    color: overview.closing ? "transparent"
+      : group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
+    // Grid: accent outline on the selected box, a dim accent one on the focused
+    // workspace, a faint light-grey one on the rest.
     border.width: group.grid ? (group.selectedGroup ? Math.max(2, Style.space(2)) : 1) : 0
     border.color: group.grid && group.selectedGroup ? overview.selectedBorderColor
-      : group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.borderColor
+      : group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.subtleBorderColor
     Behavior on border.color { ColorAnimation { duration: 120 } }
   }
 

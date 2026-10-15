@@ -171,16 +171,17 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
     y: (thumb.boxHeight - height) / 2
     radius: overview.cornerRadius
-    // While closing, borders and the frame fill drop at once so the windows land
-    // on the desktop as bare content (the frame size is unchanged).
+    // While closing, the frame fill drops at once (the border stays) so the windows
+    // land on the desktop as their own content (the frame size is unchanged).
     color: thumb.closing ? "transparent" : overview.surface
     // Selected: zoomed, raised above its neighbours, theme accent border.
     // Active (the window you came from) keeps a dimmer accent so it stays findable.
-    border.width: thumb.closing ? 0 : thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
+    // Plain windows get a faint light-grey edge (subtleBorderColor).
+    border.width: thumb.selected ? thumb.selectedBorderWidth : thumb.borderWidth
     border.color: thumb.selected ? thumb.selectedColor
       : thumb.urgent ? overview.urgent
       : thumb.active ? Util.alpha(thumb.selectedColor, 0.55)
-      : overview.borderColor
+      : overview.subtleBorderColor
     Behavior on border.color { ColorAnimation { duration: 120 } }
     // No zoom in the exact (grid) mode: the box clips it and the border + overlay
     // caption already mark the selection.

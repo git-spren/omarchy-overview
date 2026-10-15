@@ -44,6 +44,8 @@ Item {
   readonly property color surface: Color.menu.background
   readonly property color text: Color.menu.text
   readonly property color borderColor: Color.menu.border
+  // Faint light-grey edge for plain windows and workspace boxes.
+  readonly property color subtleBorderColor: Util.alpha(Color.menu.border, 0.3)
   readonly property color selectedBorder: Color.menu.selectedBorder
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
