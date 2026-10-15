@@ -140,6 +140,8 @@ Item {
   // animation then lands on that workspace instead of the one we came from.
   // { workspace: HyprlandWorkspace, toplevel: HyprlandToplevel | null }
   property var closeTarget: null
+  // Window focus dispatch to repeat once the layer is unmapped (see activate()).
+  property var pendingFocus: null
   // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
   property real zoomScale: 1
   property real zoomTX: 0
@@ -284,6 +286,8 @@ Item {
     root.hoverOrigin = null
     root.selectedIndex = -1
     root.query = ""
+    root.pendingFocus = null
+    refocusTimer.stop()
     root.rebuild()
     root.flyPhase = root.animate ? 1 : 2
     root.flyWaited = 0
@@ -323,6 +327,7 @@ Item {
     root.chromeOpacity = 1
     root.closeOpacity = 1
     root.closeTarget = null
+    if (root.pendingFocus) refocusTimer.restart()
   }
 
   // Close with the reverse animation landing on `target` (see closeTarget);
@@ -663,7 +668,13 @@ Item {
     var addr = String(toplevel.address || "")
     if (addr.length > 0) {
       if (addr.indexOf("0x") !== 0) addr = "0x" + addr
-      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"])
+      var cmd = ["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"]
+      Quickshell.execDetached(cmd)
+      // While our exclusive layer holds the keyboard, Hyprland only records
+      // the focus; unmapping the layer hands it back to the window it had
+      // before. A workspace switch hides that, a window on the current
+      // workspace does not, so focus again once the layer is gone.
+      root.pendingFocus = cmd
     } else if (toplevel.wayland) {
       toplevel.wayland.activate()
     } else if (toplevel.workspace) {
@@ -994,6 +1005,14 @@ Item {
   Timer { id: flyEndTimer; interval: root.animationMs + 80; onTriggered: root.flying = false }
 
   Timer { id: closeTimer; interval: root.closeMs + 10; onTriggered: root.finishClose() }
+  Timer {
+    id: refocusTimer; interval: 60
+    onTriggered: {
+      var cmd = root.pendingFocus
+      root.pendingFocus = null
+      if (cmd && !root.opened) Quickshell.execDetached(cmd)
+    }
+  }
 
   SequentialAnimation {
     id: closeFadeAnim
