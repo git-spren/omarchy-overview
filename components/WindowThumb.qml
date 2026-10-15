@@ -19,9 +19,14 @@ Item {
   readonly property bool selected: overview !== null && overview.selectedIndex === flatIndex
   readonly property bool active: overview !== null && overview.isActive(toplevel)
   readonly property bool urgent: toplevel !== null && toplevel.urgent
-  readonly property string title: toplevel ? String(toplevel.title || (toplevel.wayland ? toplevel.wayland.appId : "") || "") : ""
+  // Redacted (Hyprland tag overview-redact): black box, no capture, app name only.
+  readonly property bool redacted: overview !== null && overview.isRedacted(toplevel)
+  readonly property string title: !toplevel ? ""
+    : redacted ? overview.redactedLabel(toplevel)
+    : String(toplevel.title || (toplevel.wayland ? toplevel.wayland.appId : "") || "")
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
-  readonly property bool hasContent: view.hasContent
+  // A redacted window never gets content; count it as ready for the zoom wait.
+  readonly property bool hasContent: redacted || view.hasContent
   // Search: windows that do not match the typed query are dimmed.
   readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
   property real dim: matched ? 0 : 1
@@ -189,15 +194,24 @@ Item {
       anchors.centerIn: parent
       width: thumb.fitW
       height: thumb.fitH
-      captureSource: thumb.toplevel ? thumb.toplevel.wayland : null
-      live: overview !== null && overview.opened
+      captureSource: thumb.toplevel && !thumb.redacted ? thumb.toplevel.wayland : null
+      live: overview !== null && overview.opened && !thumb.redacted
       paintCursor: false
-      visible: hasContent
+      visible: hasContent && !thumb.redacted
+    }
+
+    Rectangle {
+      anchors.centerIn: parent
+      width: thumb.fitW
+      height: thumb.fitH
+      visible: thumb.redacted
+      radius: Math.max(0, parent.radius - thumb.borderWidth)
+      color: "black"
     }
 
     Image {
       anchors.centerIn: parent
-      visible: !view.hasContent
+      visible: !view.hasContent || thumb.redacted
       width: Math.min(Style.space(64), thumb.fitH * 0.5)
       height: width
       sourceSize: Qt.size(width, height)

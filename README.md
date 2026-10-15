@@ -23,8 +23,10 @@ It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Q
 - **Animations.** By default the overview zooms out from the live desktop and zooms
   back into the workspace you pick when it closes.
 - **Themed.** Colours come from the current Omarchy theme's menu tokens.
-- **Hide windows.** Windows with the Hyprland tag `overview-hide` are left out, e.g.
-  while screen sharing (see [Hiding windows](#hiding-windows)).
+- **Hide or redact windows.** Windows with the Hyprland tag `overview-hide` are left
+  out; `overview-redact` keeps the window but shows a black box and the app name
+  instead of its content and title, e.g. while screen sharing (see
+  [Hiding and redacting windows](#hiding-and-redacting-windows)).
 
 ### Searching
 
@@ -32,20 +34,29 @@ Typing narrows the overview to the windows whose title, app id or class match
 (`fo` finds Firefox and every `foot` terminal). The query and the "matches / total" count
 show in the pill at the top. Every match shows its caption, and the rest are dimmed.
 
-### Hiding windows
+### Hiding and redacting windows
 
-Tag a window `overview-hide` and the overview skips it (a workspace whose windows are
-all hidden disappears too). For one window, by address from `hyprctl clients`:
+Two Hyprland window tags keep private windows out of the overview:
+
+- `overview-hide` skips the window entirely (a workspace whose windows are all hidden
+  disappears too).
+- `overview-redact` keeps the window in its slot, still selectable, but draws a black
+  box with the app icon instead of its content (it is never captured) and captions it
+  with the app name instead of its title. Search only matches its app name and class,
+  so typing cannot probe the title.
+
+Set either tag on one window, by address from `hyprctl clients`:
 
 ```sh
-hyprctl dispatch 'hl.dsp.window.tag({ tag = "+overview-hide", window = "address:0x…" })'
-hyprctl dispatch 'hl.dsp.window.tag({ tag = "-overview-hide", window = "address:0x…" })'
+hyprctl dispatch 'hl.dsp.window.tag({ tag = "+overview-redact", window = "address:0x…" })'
+hyprctl dispatch 'hl.dsp.window.tag({ tag = "-overview-redact", window = "address:0x…" })'
 ```
 
 or for every window of an app, with a window rule in `~/.config/hypr/`:
 
 ```lua
 o.window({ class = "^(org.keepassxc.KeePassXC)$" }, { tag = "+overview-hide" })
+o.window({ class = "^(signal)$" }, { tag = "+overview-redact" })
 ```
 
 ## Keys

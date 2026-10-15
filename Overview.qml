@@ -349,16 +349,31 @@ Item {
     return (ipc && typeof ipc === "object") ? ipc : null
   }
 
-  // Windows carrying this Hyprland tag are left out of the overview (e.g. for
-  // screen sharing). Dynamic tags (from window rules) carry a trailing "*".
+  // Hyprland tags for privacy (e.g. screen sharing): hideTag leaves a window out
+  // of the overview; redactTag keeps its slot but shows a black box, never
+  // captures it, and keeps its title out of the caption and the search.
+  // Dynamic tags (from window rules) carry a trailing "*".
   readonly property string hideTag: "overview-hide"
+  readonly property string redactTag: "overview-redact"
 
-  function isHidden(toplevel) {
+  function hasTag(toplevel, tag) {
     var ipc = root.ipcOf(toplevel)
     var tags = ipc && ipc.tags ? ipc.tags : []
     for (var i = 0; i < tags.length; i++)
-      if (String(tags[i]).replace(/\*$/, "") === root.hideTag) return true
+      if (String(tags[i]).replace(/\*$/, "") === tag) return true
     return false
+  }
+
+  function isHidden(toplevel) { return root.hasTag(toplevel, root.hideTag) }
+  function isRedacted(toplevel) { return root.hasTag(toplevel, root.redactTag) }
+
+  // Caption for a redacted window: the app's name, never its title.
+  function redactedLabel(toplevel) {
+    var appId = toplevel && toplevel.wayland ? String(toplevel.wayland.appId || "") : ""
+    var entry = appId ? DesktopEntries.heuristicLookup(appId) : null
+    if (entry && entry.name) return String(entry.name)
+    var ipc = root.ipcOf(toplevel)
+    return appId || (ipc && ipc["class"] ? String(ipc["class"]) : "")
   }
 
   function byPosition(a, b) {
@@ -774,13 +789,16 @@ Item {
 
   function searchFields(toplevel) {
     if (!toplevel) return []
-    var f = [String(toplevel.title || "")]
+    // Redacted windows match on app identity only, so typing cannot probe
+    // their titles.
+    var redacted = root.isRedacted(toplevel)
+    var f = redacted ? [root.redactedLabel(toplevel)] : [String(toplevel.title || "")]
     if (toplevel.wayland && toplevel.wayland.appId) f.push(String(toplevel.wayland.appId))
     var ipc = root.ipcOf(toplevel)
     if (ipc) {
       if (ipc["class"]) f.push(String(ipc["class"]))
       if (ipc.initialClass) f.push(String(ipc.initialClass))
-      if (ipc.initialTitle) f.push(String(ipc.initialTitle))
+      if (ipc.initialTitle && !redacted) f.push(String(ipc.initialTitle))
     }
     return f
   }
@@ -915,6 +933,7 @@ Item {
         workspace: c.label, monitor: c.sub,
         windows: c.toplevels.map(function(t) {
           return { title: t.title, address: t.address, active: root.isActive(t),
+                   redacted: root.isRedacted(t),
                    matched: root.matches(t, root.query),
                    fly: root.flySource(t),
                    appId: t.wayland ? t.wayland.appId : null }
