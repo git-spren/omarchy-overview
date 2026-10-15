@@ -52,5 +52,13 @@
   // percent of animationDuration (0 to 100), and is gone at closeFadeEnd. Later
   // values keep the windows visible for longer while they land on the desktop.
   "closeFadeStart": 35,
-  "closeFadeEnd": 90
+  "closeFadeEnd": 90,
+
+  // How often thumbnails of windows on visible workspaces refresh, in times
+  // per second (0.5 to 60). Every refresh makes Hyprland redraw each of those
+  // windows at full size, so higher rates cost GPU time. Windows on hidden
+  // workspaces do not change and are captured once when the overview opens.
+  //   0       one snapshot when the overview opens, no refresh
+  //   "live"  every frame (smoothest, but keeps the GPU busy the whole time)
+  "refreshRate": 4
 }

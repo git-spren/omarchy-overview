@@ -71,6 +71,10 @@ Item {
   //   closeFadeStart / closeFadeEnd: when the close fades the overlay out, in percent
   //                   of animationDuration (default 35 / 90, 0-100); the overlay is
   //                   gone at closeFadeEnd
+  //   refreshRate:    thumbnail refreshes per second for windows on visible workspaces
+  //                   (default 4, 0.5-60), 0 = one snapshot at open, "live" = every frame
+  //                   (costly: Hyprland re-renders each window at full size per frame).
+  //                   Windows on hidden workspaces are captured once at open.
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -106,6 +110,22 @@ Item {
     var v = Number(root.settings.animationDuration)
     return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 250
   }
+  // "live", or refreshes per second (0 = snapshot only).
+  readonly property var refreshRate: {
+    var raw = root.settings.refreshRate
+    if (raw === undefined || raw === null) return 4
+    if (String(raw).trim().toLowerCase() === "live") return "live"
+    var v = Number(raw)
+    if (typeof raw === "boolean" || !isFinite(v) || v < 0 || v > 60) {
+      console.warn("git-spren.overview: unknown refreshRate value", raw, "- using 4")
+      return 4
+    }
+    return v === 0 ? 0 : Math.max(0.5, v)
+  }
+  readonly property bool refreshLive: root.refreshRate === "live"
+  readonly property int refreshIntervalMs: root.refreshLive || root.refreshRate === 0 ? 0
+    : Math.round(1000 / root.refreshRate)
+  property int captureTick: 0
   readonly property real closeFadeEndPct: root.percentSetting("closeFadeEnd", 90)
   readonly property real closeFadeStartPct: Math.min(root.percentSetting("closeFadeStart", 35), root.closeFadeEndPct)
 
@@ -980,11 +1000,19 @@ Item {
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
+                            refreshRate: root.refreshRate,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
   // ---- plumbing ----------------------------------------------------------
 
+  // Thumbnail refresh: every visible-workspace thumb recaptures on the same tick,
+  // so the overlay redraws once per tick instead of once per window.
+  Timer {
+    interval: root.refreshIntervalMs; repeat: true
+    running: root.opened && root.refreshIntervalMs > 0
+    onTriggered: root.captureTick++
+  }
   Timer { id: settleTimer; interval: 180; onTriggered: root.rebuild() }
   Timer {
     id: flyTimer; interval: 45

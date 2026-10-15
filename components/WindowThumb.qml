@@ -28,6 +28,9 @@ Item {
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
   // A redacted window never gets content; count it as ready for the zoom wait.
   readonly property bool hasContent: redacted || view.hasContent
+  // Recaptured while open: only windows whose workspace is on screen change.
+  readonly property bool refreshing: overview !== null && overview.opened && !redacted
+    && toplevel !== null && toplevel.workspace !== null && toplevel.workspace.active
   // Search: windows that do not match the typed query are dimmed.
   readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
   property real dim: matched ? 0 : 1
@@ -199,9 +202,19 @@ Item {
       width: thumb.fitW
       height: thumb.fitH
       captureSource: thumb.toplevel && !thumb.redacted ? thumb.toplevel.wayland : null
-      live: overview !== null && overview.opened && !thumb.redacted
+      // Every live frame makes Hyprland re-render the whole window at full size,
+      // so captures are paced (overview.refreshRate) and windows on hidden
+      // workspaces, which do not redraw, are captured only once at open.
+      live: thumb.refreshing && overview.refreshLive
       paintCursor: false
       visible: hasContent && !thumb.redacted
+    }
+
+    Connections {
+      target: thumb.overview
+      // A view without content is still on its automatic first capture.
+      function onCaptureTickChanged() { if (thumb.refreshing && view.hasContent) view.captureFrame() }
+      function onOpenedChanged() { if (thumb.overview.opened && view.hasContent && !thumb.redacted) view.captureFrame() }
     }
 
     Rectangle {
