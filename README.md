@@ -23,12 +23,30 @@ It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Q
 - **Animations.** By default the overview zooms out from the live desktop and zooms
   back into the workspace you pick when it closes.
 - **Themed.** Colours come from the current Omarchy theme's menu tokens.
+- **Hide windows.** Windows with the Hyprland tag `overview-hide` are left out, e.g.
+  while screen sharing (see [Hiding windows](#hiding-windows)).
 
 ### Searching
 
 Typing narrows the overview to the windows whose title, app id or class match
 (`fo` finds Firefox and every `foot` terminal). The query and the "matches / total" count
 show in the pill at the top. Every match shows its caption, and the rest are dimmed.
+
+### Hiding windows
+
+Tag a window `overview-hide` and the overview skips it (a workspace whose windows are
+all hidden disappears too). For one window, by address from `hyprctl clients`:
+
+```sh
+hyprctl dispatch 'hl.dsp.window.tag({ tag = "+overview-hide", window = "address:0x…" })'
+hyprctl dispatch 'hl.dsp.window.tag({ tag = "-overview-hide", window = "address:0x…" })'
+```
+
+or for every window of an app, with a window rule in `~/.config/hypr/`:
+
+```lua
+o.window({ class = "^(org.keepassxc.KeePassXC)$" }, { tag = "+overview-hide" })
+```
 
 ## Keys
 

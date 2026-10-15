@@ -349,6 +349,18 @@ Item {
     return (ipc && typeof ipc === "object") ? ipc : null
   }
 
+  // Windows carrying this Hyprland tag are left out of the overview (e.g. for
+  // screen sharing). Dynamic tags (from window rules) carry a trailing "*".
+  readonly property string hideTag: "overview-hide"
+
+  function isHidden(toplevel) {
+    var ipc = root.ipcOf(toplevel)
+    var tags = ipc && ipc.tags ? ipc.tags : []
+    for (var i = 0; i < tags.length; i++)
+      if (String(tags[i]).replace(/\*$/, "") === root.hideTag) return true
+    return false
+  }
+
   function byPosition(a, b) {
     var ia = root.ipcOf(a), ib = root.ipcOf(b)
     if (!ia || !ib || !ia.at || !ib.at) return 0
@@ -362,19 +374,21 @@ Item {
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++) {
       var ws = all[i]
-      if (!ws || !ws.toplevels || ws.toplevels.values.length === 0) continue
-      if (ws.id > 0) numbered.push(ws)
-      else named.push(ws)
+      if (!ws || !ws.toplevels) continue
+      var visible = ws.toplevels.values.filter(function(t) { return !root.isHidden(t) })
+      if (visible.length === 0) continue
+      if (ws.id > 0) numbered.push({ ws: ws, toplevels: visible })
+      else named.push({ ws: ws, toplevels: visible })
     }
-    numbered.sort(function(a, b) { return a.id - b.id })
-    named.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
+    numbered.sort(function(a, b) { return a.ws.id - b.ws.id })
+    named.sort(function(a, b) { return a.ws.name < b.ws.name ? -1 : a.ws.name > b.ws.name ? 1 : 0 })
 
     var multiMonitor = Hyprland.monitors.values.length > 1
     var groups = [], flat = []
     var ordered = numbered.concat(named)
     for (var g = 0; g < ordered.length; g++) {
-      var w = ordered[g]
-      var tls = w.toplevels.values.slice()
+      var w = ordered[g].ws
+      var tls = ordered[g].toplevels
       tls.sort(root.byPosition)
       var entry = {
         workspace: w,
