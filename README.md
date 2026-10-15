@@ -7,7 +7,15 @@ keyboard and you land on it, workspace switch included.
 
 It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Quickshell.
 
+<img width="1280" height="720" alt="omarchy-overview demo: open the overview, type to search, pick a window" src="https://github.com/user-attachments/assets/d4ea55fe-a238-4f8b-9ddf-681c87ea9303" />
+
+Full-quality video (1080p):
+
+https://github.com/user-attachments/assets/d0ddd1e4-f7d6-4459-a16d-9c51501c7996
+
 ## Features
+
+<img width="1920" height="1080" alt="The overview in the default grid layout" src="https://github.com/user-attachments/assets/f41f3411-3738-4f30-8fbd-bcde81ebf3e3" />
 
 - **Live thumbnails** of every window on every workspace, via Hyprland's toplevel
   export. Windows on screen refresh 4 times a second (adjustable), windows on hidden
@@ -35,6 +43,8 @@ It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Q
 Typing narrows the overview to the windows whose title, app id or class match
 (`fo` finds Firefox and every `foot` terminal). The query and the "matches / total" count
 show in the pill at the top. Every match shows its caption, and the rest are dimmed.
+
+<img width="1920" height="1080" alt="Searching for fo: matches show their caption, the rest are dimmed" src="https://github.com/user-attachments/assets/7a10c790-a252-4dd1-9169-e4f3f727ca8c" />
 
 ### Hiding and redacting windows
 
