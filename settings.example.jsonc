@@ -46,5 +46,11 @@
   "animate": "all",
 
   // Length of that animation in milliseconds, 60 to 1000.
-  "animationDuration": 250
+  "animationDuration": 250,
+
+  // When closing, the whole overlay fades out between these two points, in
+  // percent of animationDuration (0 to 100), and is gone at closeFadeEnd. Later
+  // values keep the windows visible for longer while they land on the desktop.
+  "closeFadeStart": 35,
+  "closeFadeEnd": 90
 }

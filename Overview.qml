@@ -66,6 +66,9 @@ Item {
   //                   current workspace fly from their real place on screen into their
   //                   thumbnail slot | "none" (false)
   //   animationDuration: milliseconds for that animation (default 250, 60-1000)
+  //   closeFadeStart / closeFadeEnd: when the close fades the overlay out, in percent
+  //                   of animationDuration (default 35 / 90, 0-100); the overlay is
+  //                   gone at closeFadeEnd
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -101,6 +104,20 @@ Item {
     var v = Number(root.settings.animationDuration)
     return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 250
   }
+  readonly property real closeFadeEndPct: root.percentSetting("closeFadeEnd", 90)
+  readonly property real closeFadeStartPct: Math.min(root.percentSetting("closeFadeStart", 35), root.closeFadeEndPct)
+
+  // A 0-100 setting, or the default (with a warning when the value is unusable).
+  function percentSetting(key, fallback) {
+    var raw = root.settings[key]
+    if (raw === undefined || raw === null) return fallback
+    var v = Number(raw)
+    if (typeof raw === "boolean" || !isFinite(v) || v < 0 || v > 100) {
+      console.warn("git-spren.overview: unknown " + key + " value", raw, "- using", fallback)
+      return fallback
+    }
+    return v
+  }
 
   // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
   // fresh window geometry), 2 thumbnails flying / shown, 3 flying back (closing).
@@ -111,10 +128,12 @@ Item {
   property bool closing: false
   // Headers / zebra bands fade out with the "current" reverse animation.
   property real chromeOpacity: 1
-  // Whole-overlay fade over the second half of the close, so the thumbnails
-  // vanish while still settling instead of sitting still and then snapping.
+  // Whole-overlay fade near the end of the close (closeFadeStart..closeFadeEnd),
+  // so the thumbnails vanish while still settling instead of sitting still and
+  // then snapping; the overlay really closes at closeFadeEnd.
   property real closeOpacity: 1
-  readonly property int closeMs: Math.round(root.animationMs * 0.9)
+  readonly property int closeFadeStartMs: Math.round(root.animationMs * root.closeFadeStartPct / 100)
+  readonly property int closeMs: Math.round(root.animationMs * root.closeFadeEndPct / 100)
   // Set when closing because a window / workspace was chosen: the reverse
   // animation then lands on that workspace instead of the one we came from.
   // { workspace: HyprlandWorkspace, toplevel: HyprlandToplevel | null }
@@ -947,6 +966,7 @@ Item {
                             zoom: root.selectedZoom, selectedBorder: String(root.selectedBorderColor),
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
+                            closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
@@ -975,8 +995,8 @@ Item {
 
   SequentialAnimation {
     id: closeFadeAnim
-    PauseAnimation { duration: Math.round(root.animationMs * 0.35) }
-    NumberAnimation { target: root; property: "closeOpacity"; to: 0; duration: root.closeMs - Math.round(root.animationMs * 0.35); easing.type: Easing.InOutQuad }
+    PauseAnimation { duration: root.closeFadeStartMs }
+    NumberAnimation { target: root; property: "closeOpacity"; to: 0; duration: Math.max(1, root.closeMs - root.closeFadeStartMs); easing.type: Easing.InOutQuad }
   }
 
   ParallelAnimation {

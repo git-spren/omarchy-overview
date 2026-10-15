@@ -109,6 +109,7 @@ restart the shell. Comments and trailing commas are allowed.
 | `selectedBorder` | `"accent"`, `"selected"`, `"foreground"`, `"urgent"` or `"#rrggbb"` | `"accent"` |
 | `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
 | `animationDuration` | milliseconds, 60–1000 | `250` |
+| `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `35` / `90` |
 
 ## Development
 
