@@ -93,9 +93,6 @@ omarchy-shell shell call git-spren.overview type "fire"
 qs log -p /usr/share/omarchy/shell            # shell log (QML errors, settings warnings)
 ```
 
-[`AGENTS.md`](AGENTS.md) covers the internals: the host contract, how thumbnails of hidden
-workspaces work, activation through `hyprctl`, and how the animations work.
-
 ## License
 
-MIT (as declared in `manifest.json`)
+MIT, see [`LICENSE`](LICENSE).

@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+# Local tooling and agent notes; not part of the plugin
+AGENTS.md
+.mise.toml
+.idea/
+.vscode/
