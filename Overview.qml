@@ -75,6 +75,8 @@ Item {
   //                   (default 4, 0.5-60), 0 = one snapshot at open, "live" = every frame
   //                   (costly: Hyprland re-renders each window at full size per frame).
   //                   Windows on hidden workspaces are captured once at open.
+  //   redactNoScreenShare: true (default) - windows with Hyprland's no_screen_share
+  //                   window-rule property are redacted like overview-redact | false
   readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
   property var settings: ({})
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
@@ -126,6 +128,13 @@ Item {
   readonly property int refreshIntervalMs: root.refreshLive || root.refreshRate === 0 ? 0
     : Math.round(1000 / root.refreshRate)
   property int captureTick: 0
+  readonly property bool redactNoScreenShare: {
+    var v = root.settings.redactNoScreenShare
+    if (v === undefined || v === null || v === true) return true
+    if (v === false) return false
+    console.warn("git-spren.overview: unknown redactNoScreenShare value", v, "- using true")
+    return true
+  }
   readonly property real closeFadeEndPct: root.percentSetting("closeFadeEnd", 90)
   readonly property real closeFadeStartPct: Math.min(root.percentSetting("closeFadeStart", 35), root.closeFadeEndPct)
 
@@ -301,6 +310,7 @@ Item {
     root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
+    root.queryNoScreenShare()
     root.selectionTouched = false
     root.hoverArmed = false
     root.hoverOrigin = null
@@ -411,7 +421,42 @@ Item {
   }
 
   function isHidden(toplevel) { return root.hasTag(toplevel, root.hideTag) }
-  function isRedacted(toplevel) { return root.hasTag(toplevel, root.redactTag) }
+  function isRedacted(toplevel) {
+    return root.hasTag(toplevel, root.redactTag)
+      || (root.redactNoScreenShare && root.noScreenShare[toplevel ? toplevel.address : ""] === true)
+  }
+  // no_screen_share is not in the clients JSON, so it is asked per window with
+  // getprop. Until a window's answer is in, it is not captured (icon only).
+  function privacyPending(toplevel) {
+    return root.redactNoScreenShare && !!toplevel && root.noScreenShare[toplevel.address] === undefined
+  }
+
+  // address (no 0x) -> bool, refreshed while closed on window events.
+  property var noScreenShare: ({})
+  property var noScreenShareQuery: []
+  function queryNoScreenShare() {
+    if (!root.redactNoScreenShare) return
+    if (noShareProc.running) { noShareTimer.restart(); return }
+    var addrs = Hyprland.toplevels.values.map(function(t) { return String(t.address) })
+      .filter(function(a) { return /^[0-9a-f]+$/i.test(a) })
+    if (addrs.length === 0) { root.noScreenShare = ({}); return }
+    root.noScreenShareQuery = addrs
+    noShareProc.command = ["hyprctl", "-j", "--batch", addrs.map(function(a) {
+      return "getprop address:0x" + a + " no_screen_share"
+    }).join("; ")]
+    noShareProc.running = true
+  }
+  function applyNoScreenShare(text) {
+    var parts = String(text || "").split(/\n\s*\n/).map(function(p) { return p.trim() })
+      .filter(function(p) { return p !== "" })
+    var addrs = root.noScreenShareQuery, map = ({})
+    for (var i = 0; i < addrs.length; i++) {
+      var v = false
+      try { v = JSON.parse(parts[i]).no_screen_share === true } catch (e) {}   // "window not found"
+      map[addrs[i]] = v
+    }
+    root.noScreenShare = map
+  }
 
   // Caption for a redacted window: the app's name, never its title.
   function redactedLabel(toplevel) {
@@ -1000,7 +1045,7 @@ Item {
                             layout: root.layoutMode,
                             animate: root.animateMode, animationDuration: root.animationMs,
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
-                            refreshRate: root.refreshRate,
+                            refreshRate: root.refreshRate, redactNoScreenShare: root.redactNoScreenShare,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
@@ -1080,8 +1125,18 @@ Item {
       var name = String(event.name)
       if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|activewindow(v2)?|changefloatingmode|fullscreen)$/.test(name))
         root.scheduleRebuild()
+      // Window rules (and so no_screen_share) can match on title.
+      if (/^(openwindow|closewindow|windowtitle(v2)?)$/.test(name)) noShareTimer.restart()
     }
   }
+
+  Timer { id: noShareTimer; interval: 150; onTriggered: root.queryNoScreenShare() }
+  Process {
+    id: noShareProc
+    stdout: StdioCollector { onStreamFinished: root.applyNoScreenShare(text) }
+  }
+  Component.onCompleted: noShareTimer.restart()
+  onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryNoScreenShare()
 
   PanelWindow {
     id: panel

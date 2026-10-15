@@ -20,16 +20,18 @@ Item {
   readonly property bool active: overview !== null && overview.isActive(toplevel)
   readonly property bool urgent: toplevel !== null && toplevel.urgent
   readonly property bool closing: overview !== null && overview.closing
-  // Redacted (Hyprland tag overview-redact): black box, no capture, app name only.
+  // Redacted (Hyprland tag overview-redact, or no_screen_share): black box, no
+  // capture, app name only. Pending: no_screen_share not known yet, so no capture.
   readonly property bool redacted: overview !== null && overview.isRedacted(toplevel)
+  readonly property bool pending: overview !== null && overview.privacyPending(toplevel)
   readonly property string title: !toplevel ? ""
     : redacted ? overview.redactedLabel(toplevel)
     : String(toplevel.title || (toplevel.wayland ? toplevel.wayland.appId : "") || "")
   readonly property string iconSource: overview ? overview.iconFor(toplevel) : ""
   // A redacted window never gets content; count it as ready for the zoom wait.
-  readonly property bool hasContent: redacted || view.hasContent
+  readonly property bool hasContent: redacted || pending || view.hasContent
   // Recaptured while open: only windows whose workspace is on screen change.
-  readonly property bool refreshing: overview !== null && overview.opened && !redacted
+  readonly property bool refreshing: overview !== null && overview.opened && !redacted && !pending
     && toplevel !== null && toplevel.workspace !== null && toplevel.workspace.active
   // Search: windows that do not match the typed query are dimmed.
   readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
@@ -201,7 +203,7 @@ Item {
       anchors.centerIn: parent
       width: thumb.fitW
       height: thumb.fitH
-      captureSource: thumb.toplevel && !thumb.redacted ? thumb.toplevel.wayland : null
+      captureSource: thumb.toplevel && !thumb.redacted && !thumb.pending ? thumb.toplevel.wayland : null
       // Every live frame makes Hyprland re-render the whole window at full size,
       // so captures are paced (overview.refreshRate) and windows on hidden
       // workspaces, which do not redraw, are captured only once at open.
@@ -214,7 +216,7 @@ Item {
       target: thumb.overview
       // A view without content is still on its automatic first capture.
       function onCaptureTickChanged() { if (thumb.refreshing && view.hasContent) view.captureFrame() }
-      function onOpenedChanged() { if (thumb.overview.opened && view.hasContent && !thumb.redacted) view.captureFrame() }
+      function onOpenedChanged() { if (thumb.overview.opened && view.hasContent && !thumb.redacted && !thumb.pending) view.captureFrame() }
     }
 
     Rectangle {

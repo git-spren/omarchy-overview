@@ -60,5 +60,11 @@
   // workspaces do not change and are captured once when the overview opens.
   //   0       one snapshot when the overview opens, no refresh
   //   "live"  every frame (smoothest, but keeps the GPU busy the whole time)
-  "refreshRate": 4
+  "refreshRate": 4,
+
+  // Redact windows that Hyprland keeps out of screen sharing (the
+  // no_screen_share window-rule property, which Omarchy sets for 1Password and
+  // Bitwarden), as if they had the overview-redact tag: a black box with the
+  // app icon and name instead of their content and title.
+  "redactNoScreenShare": true
 }

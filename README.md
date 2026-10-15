@@ -61,6 +61,10 @@ o.window({ class = "^(org.keepassxc.KeePassXC)$" }, { tag = "+overview-hide" })
 o.window({ class = "^(signal)$" }, { tag = "+overview-redact" })
 ```
 
+Windows that Hyprland keeps out of screen sharing (the `no_screen_share` window-rule
+property, which Omarchy sets for 1Password and Bitwarden) are redacted as well. Set
+`redactNoScreenShare` to `false` to show them normally.
+
 ## Keys
 
 | Key | Action |
@@ -112,6 +116,7 @@ restart the shell. Comments and trailing commas are allowed.
 | `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
 | `animationDuration` | milliseconds, 60–1000 | `250` |
 | `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `35` / `90` |
+| `redactNoScreenShare` | redact windows with Hyprland's `no_screen_share` property, like `overview-redact` (`true` or `false`) | `true` |
 | `refreshRate` | thumbnail refreshes per second for windows on visible workspaces (0.5–60), `0` for one snapshot at open, or `"live"` for every frame (heavy on the GPU) | `4` |
 
 ## Development
