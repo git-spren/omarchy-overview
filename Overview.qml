@@ -319,6 +319,11 @@ Item {
     root.pendingFocus = null
     refocusTimer.stop()
     root.rebuild()
+    // Payload options: {"query": "..."} opens with the search filled in.
+    var payload = null
+    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { console.warn("overview: bad payload", payloadJson) }
+    if (payload && typeof payload.query === "string")
+      root.setQuery(payload.query.replace(/[\x00-\x1f\x7f]/g, ""))
     root.flyPhase = root.animate ? 1 : 2
     root.flyWaited = 0
     root.opened = true
@@ -474,8 +479,9 @@ Item {
     return ia.at[0] - ib.at[0]
   }
 
-  function rebuild() {
-    var selectedAddress = root.selectionTouched && root.selectedToplevel() ? root.selectedToplevel().address : ""
+  // Workspaces with at least one shown window, in overview order (numbered by
+  // id, then named ones by name), each with its windows sorted by position.
+  function orderedWorkspaces() {
     var numbered = [], named = []
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++) {
@@ -488,17 +494,26 @@ Item {
     }
     numbered.sort(function(a, b) { return a.ws.id - b.ws.id })
     named.sort(function(a, b) { return a.ws.name < b.ws.name ? -1 : a.ws.name > b.ws.name ? 1 : 0 })
+    var ordered = numbered.concat(named)
+    for (var g = 0; g < ordered.length; g++) ordered[g].toplevels.sort(root.byPosition)
+    return ordered
+  }
 
+  function workspaceLabel(ws) {
+    return ws.id > 0 ? String(ws.id) : String(ws.name).replace(/^special:/, "")
+  }
+
+  function rebuild() {
+    var selectedAddress = root.selectionTouched && root.selectedToplevel() ? root.selectedToplevel().address : ""
     var multiMonitor = Hyprland.monitors.values.length > 1
     var groups = [], flat = []
-    var ordered = numbered.concat(named)
+    var ordered = root.orderedWorkspaces()
     for (var g = 0; g < ordered.length; g++) {
       var w = ordered[g].ws
       var tls = ordered[g].toplevels
-      tls.sort(root.byPosition)
       var entry = {
         workspace: w,
-        label: w.id > 0 ? String(w.id) : String(w.name).replace(/^special:/, ""),
+        label: root.workspaceLabel(w),
         sub: multiMonitor && w.monitor ? w.monitor.name : "",
         toplevels: tls,
         firstIndex: flat.length
@@ -728,12 +743,17 @@ Item {
 
   // Hyprland ignores foreign-toplevel activate requests unless
   // misc:focus_on_activate is set, so focus through the dispatcher instead.
+  function focusCommand(toplevel) {
+    var addr = String(toplevel && toplevel.address || "")
+    if (addr.length === 0) return null
+    if (addr.indexOf("0x") !== 0) addr = "0x" + addr
+    return ["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"]
+  }
+
   function activate(toplevel) {
     if (!toplevel) return
-    var addr = String(toplevel.address || "")
-    if (addr.length > 0) {
-      if (addr.indexOf("0x") !== 0) addr = "0x" + addr
-      var cmd = ["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"]
+    var cmd = root.focusCommand(toplevel)
+    if (cmd) {
       Quickshell.execDetached(cmd)
       // While our exclusive layer holds the keyboard, Hyprland only records
       // the focus; unmapping the layer hands it back to the window it had
@@ -1023,6 +1043,77 @@ Item {
     return "ok"
   }
 
+  // Every shown window in overview order (works while closed), optionally only
+  // those matching a search query. Redacted windows report their app name as
+  // the title. `call git-spren.overview list "fire"`
+  function list(query) {
+    var q = String(query || "")
+    var out = []
+    root.orderedWorkspaces().forEach(function(g) {
+      g.toplevels.forEach(function(t) {
+        if (!root.matches(t, q)) return
+        var ipc = root.ipcOf(t)
+        var redacted = root.isRedacted(t)
+        out.push({ address: "0x" + String(t.address).replace(/^0x/, ""),
+                   title: redacted ? root.redactedLabel(t) : String(t.title || ""),
+                   appId: t.wayland ? String(t.wayland.appId || "") : "",
+                   "class": ipc && ipc["class"] ? String(ipc["class"]) : "",
+                   workspace: root.workspaceLabel(g.ws),
+                   monitor: g.ws.monitor ? g.ws.monitor.name : "",
+                   active: root.isActive(t), redacted: redacted })
+      })
+    })
+    return JSON.stringify(out)
+  }
+
+  // Focus the best match for a search query, like typing it and pressing
+  // Enter, without showing the overview. `call git-spren.overview jump "fire"`
+  // (not "focus": that is Item.focus, like "state" below)
+  function jump(query) {
+    var q = String(query || "")
+    if (q.trim() === "" || root.closing) return "ignored"
+    var best = null, bestScore = -1
+    root.orderedWorkspaces().forEach(function(g) {
+      g.toplevels.forEach(function(t) {
+        var sc = root.matchScore(t, q)
+        if (sc > bestScore) { bestScore = sc; best = t }
+      })
+    })
+    if (!best) return "no match"
+    if (root.opened) { root.activate(best); return "ok" }
+    var cmd = root.focusCommand(best)
+    if (!cmd) return "no match"
+    Quickshell.execDetached(cmd)
+    return "ok"
+  }
+
+  // While open: go to a workspace by id or name, like its digit key.
+  function workspace(name) {
+    if (!root.opened || root.closing) return "ignored"
+    var s = String(name || "").trim()
+    if (/^-?\d+$/.test(s)) { root.focusWorkspaceById(parseInt(s, 10)); return "ok" }
+    var all = Hyprland.workspaces.values
+    for (var i = 0; i < all.length; i++) {
+      var n = String(all[i].name)
+      if (n === s || n === "special:" + s) { root.focusWorkspace(all[i]); return "ok" }
+    }
+    return "unknown workspace: " + s
+  }
+
+  // While open: select a window by address (with or without 0x).
+  function select(address) {
+    if (!root.opened || root.closing) return "ignored"
+    var a = String(address || "").trim().replace(/^0x/i, "").toLowerCase()
+    for (var i = 0; i < root.flat.length; i++) {
+      if (String(root.flat[i].toplevel.address).replace(/^0x/i, "").toLowerCase() !== a) continue
+      if (!root.isMatch(i)) return "filtered"
+      root.selectionTouched = true
+      root.selectedIndex = i
+      return "ok"
+    }
+    return "unknown window: " + address
+  }
+
   // Current model as JSON (for debugging; "state" is taken by Item).
   function dump(arg) {
     var groups = root.groups.map(function(c) {
@@ -1135,7 +1226,9 @@ Item {
     id: noShareProc
     stdout: StdioCollector { onStreamFinished: root.applyNoScreenShare(text) }
   }
-  Component.onCompleted: noShareTimer.restart()
+  // Fetch IPC data (focus history, positions, tags) up front, so `list` and
+  // `jump` are right even before the first window event or open.
+  Component.onCompleted: { noShareTimer.restart(); refreshTimer.restart() }
   onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryNoScreenShare()
 
   PanelWindow {

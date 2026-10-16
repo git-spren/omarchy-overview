@@ -89,6 +89,24 @@ property, which Omarchy sets for 1Password and Bitwarden) are redacted as well. 
 | `Escape` | clear the search, then close |
 | click a window / click the backdrop | focus it / close |
 
+## Commands
+
+The overview can be scripted through the shell's IPC, e.g. from Hyprland bindings:
+
+```sh
+omarchy-shell shell toggle git-spren.overview '{"query":"fire"}'  # open with the search filled in
+omarchy-shell shell call git-spren.overview jump "fire"           # focus the best match, no overlay
+omarchy-shell shell call git-spren.overview list ""               # every window as JSON
+omarchy-shell shell call git-spren.overview list "fire"           # only the matches
+omarchy-shell shell call git-spren.overview workspace 3           # while open: go to a workspace (id or name)
+omarchy-shell shell call git-spren.overview select 0x55d0c1a2b3c0 # while open: select a window
+```
+
+`jump` and `list` work while the overview is closed and use the same fuzzy search as
+typing. Redacted windows are listed under their app name and can't be matched by
+title. The calls return `ok`, `ignored` (wrong state), `no match`, `filtered` (hidden by
+the current search) or `unknown …`.
+
 ## Install
 
 Requires Omarchy 4 (tested on 4.0.4 with Hyprland 0.56.2 and Quickshell 0.3.1).
