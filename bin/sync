@@ -12,7 +12,7 @@ dest=$HOME/.config/omarchy/plugins/$id
 mkdir -p "$dest"
 rsync -a --delete \
   --exclude .git --exclude-from "$src/.git/info/exclude" \
-  --exclude .mise.toml --exclude .gitignore --exclude bin --exclude "settings.example.*" --exclude docs --exclude README.md \
+  --exclude .mise.toml --exclude .gitignore --exclude bin --exclude docs --exclude README.md \
   "$src/" "$dest/"
 echo "synced $id -> $dest"
 if (( restart )); then

@@ -132,9 +132,28 @@ hl.layer_rule({ match = { namespace = "git-spren-overview" }, no_anim = true, an
 
 ## Settings
 
-All settings are optional. Copy [`settings.example.jsonc`](settings.example.jsonc) to
-`~/.config/omarchy/git-spren.overview.json` and edit it. Changes apply on save; you don't need to
-restart the shell. Comments and trailing commas are allowed.
+Settings are stored the way Omarchy stores every plugin's settings: as fields on the plugin's
+own entry in `~/.config/omarchy/shell.json`, next to its `id`. All of them are optional; a missing
+key uses its default. Change them from a terminal:
+
+```sh
+omarchy-shell shell call git-spren.overview set "layout=rows"
+omarchy-shell shell call git-spren.overview set '{"zoom": 1.3, "animate": "current"}'
+omarchy-shell shell call git-spren.overview reset "zoom"   # back to the default; reset "" clears all
+omarchy-shell shell call git-spren.overview config ""      # stored and effective values as JSON
+```
+
+`set` checks every value and refuses unknown keys or values, and only works while the overview
+is closed. You can also edit the entry by hand; changes apply on save without restarting the
+shell:
+
+```json
+"plugins": [
+  { "id": "git-spren.overview", "layout": "rows", "refreshRate": 2 }
+]
+```
+
+Disabling the plugin removes its entry, and its settings with it.
 
 | Key | Values | Default |
 |---|---|---|
@@ -142,8 +161,8 @@ restart the shell. Comments and trailing commas are allowed.
 | `zoom` | selected-thumbnail zoom in columns/rows: `"small"`, `"medium"`, `"large"` or a number 1.0–2.0 | `"medium"` |
 | `selectedBorder` | `"accent"`, `"selected"`, `"foreground"`, `"urgent"` or `"#rrggbb"` | `"accent"` |
 | `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
-| `animationDuration` | milliseconds, 60–1000 | `250` |
-| `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `35` / `90` |
+| `animationDuration` | milliseconds, 60–1000 | `420` |
+| `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `80` / `95` |
 | `redactNoScreenShare` | redact windows with Hyprland's `no_screen_share` property, like `overview-redact` (`true` or `false`) | `true` |
 | `refreshRate` | thumbnail refreshes per second for windows on visible workspaces (0.5–60), `0` for one snapshot at open, or `"live"` for every frame (heavy on the GPU) | `4` |
 
@@ -156,6 +175,7 @@ omarchy-shell shell toggle git-spren.overview       # open / close
 omarchy-shell shell call git-spren.overview dump "" # current model as JSON
 omarchy-shell shell call git-spren.overview press down
 omarchy-shell shell call git-spren.overview type "fire"
+omarchy-shell shell call git-spren.overview config ""   # settings as JSON
 qs log -p /usr/share/omarchy/shell            # shell log (QML errors, settings warnings)
 ```
 

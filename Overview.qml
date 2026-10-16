@@ -54,7 +54,11 @@ Item {
   readonly property string fontFamily: Style.font.menuFamily
   readonly property color zebraColor: Util.alpha(Color.foreground, 0.045)
 
-  // ---- user settings (~/.config/omarchy/git-spren.overview.json, hot-reloaded) ----
+  // ---- user settings ------------------------------------------------------
+  // Settings live inline on this plugin's entry in ~/.config/omarchy/shell.json,
+  // as the shell's storage rules ask: { "id": "git-spren.overview", "layout": "rows", ... }.
+  // The host gives overlays no way to read that entry, so we read the file ourselves
+  // (read-only, watched); writes go through shell.updateEntryInline() via set()/reset().
   //   zoom:           "small" | "medium" | "large" | number 1.0–2.0   (default medium)
   //   selectedBorder: "accent" | "selected" | "foreground" | "urgent" | "#rrggbb"  (default accent)
   //   layout:         "grid" (default; a box per workspace replicating the monitor, windows at
@@ -67,9 +71,9 @@ Item {
   //                   window) and zooms into view | "current" (true) - windows of the
   //                   current workspace fly from their real place on screen into their
   //                   thumbnail slot | "none" (false)
-  //   animationDuration: milliseconds for that animation (default 250, 60-1000)
+  //   animationDuration: milliseconds for that animation (default 420, 60-1000)
   //   closeFadeStart / closeFadeEnd: when the close fades the overlay out, in percent
-  //                   of animationDuration (default 35 / 90, 0-100); the overlay is
+  //                   of animationDuration (default 80 / 95, 0-100); the overlay is
   //                   gone at closeFadeEnd
   //   refreshRate:    thumbnail refreshes per second for windows on visible workspaces
   //                   (default 4, 0.5-60), 0 = one snapshot at open, "live" = every frame
@@ -77,78 +81,83 @@ Item {
   //                   Windows on hidden workspaces are captured once at open.
   //   redactNoScreenShare: true (default) - windows with Hyprland's no_screen_share
   //                   window-rule property are redacted like overview-redact | false
-  readonly property string settingsPath: Quickshell.env("HOME") + "/.config/omarchy/git-spren.overview.json"
+  readonly property string shellConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+  // Our entry's fields (without "id"); {} = all defaults.
   property var settings: ({})
+  readonly property var settingDefaults: ({
+    zoom: "medium", selectedBorder: "accent", layout: "grid", animate: "all",
+    animationDuration: 420, closeFadeStart: 80, closeFadeEnd: 95, refreshRate: 4,
+    redactNoScreenShare: true
+  })
   readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
-  readonly property real selectedZoom: {
-    var z = root.settings.zoom
-    if (typeof z === "number" && z >= 1 && z <= 2) return z
-    var key = String(z || "medium").toLowerCase()
-    return root.zoomLevels[key] !== undefined ? root.zoomLevels[key] : root.zoomLevels.medium
+
+  // Normalised value of one setting, or undefined when `raw` is not valid for `key`.
+  function parseSetting(key, raw) {
+    var s = typeof raw === "string" ? raw.trim().toLowerCase() : ""
+    var n = (typeof raw === "number" || (typeof raw === "string" && s !== "")) ? Number(raw) : NaN
+    switch (key) {
+    case "zoom":
+      if (isFinite(n) && n >= 1 && n <= 2) return n
+      return root.zoomLevels[s]
+    case "selectedBorder":
+      if (s === "accent") return root.accent
+      if (s === "selected") return Color.menu.selectedBorder
+      if (s === "foreground") return Color.foreground
+      if (s === "urgent") return root.urgent
+      if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(s)) return s
+      return undefined
+    case "layout":
+      return s === "grid" || s === "rows" || s === "columns" ? s : undefined
+    case "animate":
+      if (raw === true || s === "true" || s === "on") return "current"
+      if (raw === false || s === "false" || s === "off") return "none"
+      return s === "current" || s === "all" || s === "none" ? s : undefined
+    case "animationDuration":
+      return isFinite(n) && n > 0 ? Math.max(60, Math.min(1000, Math.round(n))) : undefined
+    case "closeFadeStart":
+    case "closeFadeEnd":
+      return isFinite(n) && n >= 0 && n <= 100 ? n : undefined
+    case "refreshRate":
+      if (s === "live") return "live"
+      if (!isFinite(n) || n < 0 || n > 60) return undefined
+      return n === 0 ? 0 : Math.max(0.5, n)
+    case "redactNoScreenShare":
+      return raw === true || raw === false ? raw : undefined
+    }
+    return undefined
   }
-  readonly property color selectedBorderColor: root.colorSetting(root.settings.selectedBorder, root.accent)
-  readonly property string layoutMode: {
-    var v = String(root.settings.layout || "grid").toLowerCase()
-    return v === "rows" || v === "columns" ? v : "grid"
+
+  // Effective value: the stored one if valid, else the default (with a warning).
+  function setting(key) {
+    var raw = root.settings[key]
+    if (raw !== undefined && raw !== null) {
+      var v = root.parseSetting(key, raw)
+      if (v !== undefined) return v
+      console.warn("git-spren.overview: unknown " + key + " value", JSON.stringify(raw),
+                   "- using", JSON.stringify(root.settingDefaults[key]))
+    }
+    return root.parseSetting(key, root.settingDefaults[key])
   }
+
+  readonly property real selectedZoom: root.setting("zoom")
+  readonly property color selectedBorderColor: root.setting("selectedBorder")
+  readonly property string layoutMode: root.setting("layout")
   readonly property bool layoutRows: root.layoutMode === "rows"
   readonly property bool layoutGrid: root.layoutMode === "grid"
-  readonly property string animateMode: {
-    var v = root.settings.animate
-    if (v === undefined || v === null) return "all"
-    if (v === true) return "current"
-    if (v === false) return "none"
-    var s = String(v).trim().toLowerCase()
-    if (s === "current" || s === "all" || s === "none") return s
-    if (s === "true" || s === "on") return "current"
-    if (s === "false" || s === "off") return "none"
-    console.warn("git-spren.overview: unknown animate value", v, "- using all")
-    return "all"
-  }
+  readonly property string animateMode: root.setting("animate")
   readonly property bool animate: root.animateMode !== "none"
   readonly property bool animateCurrent: root.animateMode === "current"
   readonly property bool animateAll: root.animateMode === "all"
-  readonly property int animationMs: {
-    var v = Number(root.settings.animationDuration)
-    return isFinite(v) && v > 0 ? Math.max(60, Math.min(1000, Math.round(v))) : 250
-  }
+  readonly property int animationMs: root.setting("animationDuration")
   // "live", or refreshes per second (0 = snapshot only).
-  readonly property var refreshRate: {
-    var raw = root.settings.refreshRate
-    if (raw === undefined || raw === null) return 4
-    if (String(raw).trim().toLowerCase() === "live") return "live"
-    var v = Number(raw)
-    if (typeof raw === "boolean" || !isFinite(v) || v < 0 || v > 60) {
-      console.warn("git-spren.overview: unknown refreshRate value", raw, "- using 4")
-      return 4
-    }
-    return v === 0 ? 0 : Math.max(0.5, v)
-  }
+  readonly property var refreshRate: root.setting("refreshRate")
   readonly property bool refreshLive: root.refreshRate === "live"
   readonly property int refreshIntervalMs: root.refreshLive || root.refreshRate === 0 ? 0
     : Math.round(1000 / root.refreshRate)
   property int captureTick: 0
-  readonly property bool redactNoScreenShare: {
-    var v = root.settings.redactNoScreenShare
-    if (v === undefined || v === null || v === true) return true
-    if (v === false) return false
-    console.warn("git-spren.overview: unknown redactNoScreenShare value", v, "- using true")
-    return true
-  }
-  readonly property real closeFadeEndPct: root.percentSetting("closeFadeEnd", 90)
-  readonly property real closeFadeStartPct: Math.min(root.percentSetting("closeFadeStart", 35), root.closeFadeEndPct)
-
-  // A 0-100 setting, or the default (with a warning when the value is unusable).
-  function percentSetting(key, fallback) {
-    var raw = root.settings[key]
-    if (raw === undefined || raw === null) return fallback
-    var v = Number(raw)
-    if (typeof raw === "boolean" || !isFinite(v) || v < 0 || v > 100) {
-      console.warn("git-spren.overview: unknown " + key + " value", raw, "- using", fallback)
-      return fallback
-    }
-    return v
-  }
+  readonly property bool redactNoScreenShare: root.setting("redactNoScreenShare")
+  readonly property real closeFadeEndPct: root.setting("closeFadeEnd")
+  readonly property real closeFadeStartPct: Math.min(root.setting("closeFadeStart"), root.closeFadeEndPct)
 
   // Fly-in phases: 0 closed, 1 opened but thumbnails still hidden (waiting for
   // fresh window geometry), 2 thumbnails flying / shown, 3 flying back (closing).
@@ -183,54 +192,40 @@ Item {
   // workspace's captures, so the 1:1 start frame shows real content.
   property int flyWaited: 0
 
-  function colorSetting(value, fallback) {
-    var v = String(value || "").trim().toLowerCase()
-    if (!v || v === "accent") return root.accent
-    if (v === "selected") return Color.menu.selectedBorder
-    if (v === "foreground") return Color.foreground
-    if (v === "urgent") return root.urgent
-    if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(v)) return v
-    console.warn("git-spren.overview: unknown selectedBorder value", value, "- using accent")
-    return fallback
+  // Our entry in shell.json: plugins[] (where `omarchy plugin enable` puts an
+  // overlay), else a bar layout section.
+  function findOwnEntry(config) {
+    if (!config || typeof config !== "object") return null
+    var lists = [config.plugins]
+    var layout = config.bar && config.bar.layout
+    if (layout) lists.push(layout.left, layout.center, layout.right)
+    for (var l = 0; l < lists.length; l++) {
+      var list = lists[l]
+      if (!Array.isArray(list)) continue
+      for (var i = 0; i < list.length; i++)
+        if (list[i] && list[i].id === root.pluginId) return list[i]
+    }
+    return null
   }
 
-  // Strip // and /* */ comments and trailing commas (outside strings) so the
-  // settings file can be JSONC, like Omarchy's own menu config.
-  function stripJsonc(text) {
-    var out = "", i = 0, n = text.length, inStr = false
-    while (i < n) {
-      var ch = text[i]
-      if (inStr) {
-        out += ch
-        if (ch === "\\" && i + 1 < n) { out += text[i + 1]; i += 2; continue }
-        if (ch === "\"") inStr = false
-        i++; continue
-      }
-      if (ch === "\"") { inStr = true; out += ch; i++; continue }
-      if (ch === "/" && text[i + 1] === "/") { while (i < n && text[i] !== "\n") i++; continue }
-      if (ch === "/" && text[i + 1] === "*") { i += 2; while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++; i += 2; continue }
-      out += ch; i++
+  function applyShellConfig(text) {
+    var config
+    try { config = JSON.parse(String(text || "")) } catch (e) {
+      console.warn("git-spren.overview: cannot parse " + root.shellConfigPath + ":", e)
+      return   // keep the last good settings
     }
-    return out.replace(/,(\s*[}\]])/g, "$1")
-  }
-
-  function applySettings(raw) {
-    var text = root.stripJsonc(String(raw || "")).trim()
-    if (!text) { root.settings = ({}); return }
-    try {
-      var parsed = JSON.parse(text)
-      root.settings = (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : ({})
-    } catch (e) {
-      console.warn("git-spren.overview: cannot parse " + root.settingsPath + ":", e)
-    }
+    var entry = root.findOwnEntry(config)
+    var next = ({})
+    if (entry) for (var k in entry) if (k !== "id") next[k] = entry[k]
+    if (JSON.stringify(next) !== JSON.stringify(root.settings)) root.settings = next
   }
 
   FileView {
-    path: root.settingsPath
+    path: root.shellConfigPath
     watchChanges: true
-    onLoaded: root.applySettings(text())
+    onLoaded: root.applyShellConfig(text())
     onFileChanged: reload()
-    onLoadFailed: function(error) { root.settings = ({}) }   // no file = defaults
+    onLoadFailed: function(error) { root.settings = ({}) }   // no shell.json = defaults
   }
 
   // Layout knobs (all in shell-scaled px).
@@ -1138,6 +1133,72 @@ Item {
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
                             refreshRate: root.refreshRate, redactNoScreenShare: root.redactNoScreenShare,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
+  }
+
+  // ---- settings over IPC --------------------------------------------------
+  // `omarchy-shell shell call git-spren.overview config ""` / `set "layout=rows"` /
+  // `set '{"zoom":1.3}'` / `reset "zoom"` / `reset ""`. ("settings" is the property.)
+
+  // Stored entry fields plus the values in effect.
+  function config(arg) {
+    var effective = ({})
+    for (var key in root.settingDefaults) {
+      var v = root.setting(key)
+      effective[key] = key === "selectedBorder" ? String(v) : v
+    }
+    return JSON.stringify({ stored: root.settings, effective: effective })
+  }
+
+  // "key=value" (value parsed as JSON, else taken as a string) or a JSON object.
+  function set(arg) {
+    var text = String(arg || "").trim()
+    var changes = null
+    if (text.charAt(0) === "{") {
+      try { changes = JSON.parse(text) } catch (e) { return "invalid JSON: " + e }
+      if (!changes || typeof changes !== "object" || Array.isArray(changes)) return "expected a JSON object"
+    } else {
+      var eq = text.indexOf("=")
+      if (eq <= 0) return "usage: set key=value | set '{\"key\": value}'"
+      var raw = text.slice(eq + 1).trim()
+      var value
+      try { value = JSON.parse(raw) } catch (e) { value = raw }
+      changes = ({})
+      changes[text.slice(0, eq).trim()] = value
+    }
+    var next = JSON.parse(JSON.stringify(root.settings))
+    for (var key in changes) {
+      if (!(key in root.settingDefaults))
+        return "unknown setting: " + key + " (known: " + Object.keys(root.settingDefaults).join(", ") + ")"
+      if (root.parseSetting(key, changes[key]) === undefined)
+        return "invalid value for " + key + ": " + JSON.stringify(changes[key])
+      next[key] = changes[key]
+    }
+    return root.writeSettings(next)
+  }
+
+  // Drop one stored key (back to its default), or all of them with "".
+  function reset(arg) {
+    var key = String(arg || "").trim()
+    var next = ({})
+    if (key) {
+      if (!(key in root.settings)) return key in root.settingDefaults ? "ok" : "unknown setting: " + key
+      next = JSON.parse(JSON.stringify(root.settings))
+      delete next[key]
+    }
+    return root.writeSettings(next)
+  }
+
+  function writeSettings(next) {
+    // A shell.json write makes the host rebuild its plugin loaders, which would
+    // tear the overlay down mid-use.
+    if (root.opened) return "close the overview first"
+    if (JSON.stringify(next) === JSON.stringify(root.settings)) return "ok"
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function")
+      return "the host does not allow saving settings"
+    if (!root.shell.updateEntryInline(root.pluginId, next))
+      return "not saved: is " + root.pluginId + " enabled (an entry in shell.json)?"
+    root.settings = next
+    return "ok"
   }
 
   // ---- plumbing ----------------------------------------------------------
