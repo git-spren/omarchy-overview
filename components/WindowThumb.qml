@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 
 // A single window: live toplevel capture fitted into a box, with an icon +
 // title caption. Hover selects, click activates (focus + workspace switch).
@@ -242,7 +243,7 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: parent.radius
-      color: Color.background
+      color: Commons.Color.background
       opacity: thumb.dim * 0.78
       visible: opacity > 0
     }

@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
+import qs.Commons as Commons
 import "components"
 
 // Exposé-style overview: every mapped window as a live thumbnail, one column
@@ -40,19 +41,19 @@ Item {
 
   // Theme: share the [menu] surface tokens like the other Omarchy overlays.
   // The menu scrim can be quite transparent; thumbnails need a calmer backdrop.
-  readonly property color scrim: Util.alpha(Color.menu.scrim, Math.max(Color.menu.scrim.a, 0.82))
-  readonly property color surface: Color.menu.background
-  readonly property color text: Color.menu.text
-  readonly property color borderColor: Color.menu.border
+  readonly property color scrim: Util.alpha(Commons.Color.menu.scrim, Math.max(Commons.Color.menu.scrim.a, 0.82))
+  readonly property color surface: Commons.Color.menu.background
+  readonly property color text: Commons.Color.menu.text
+  readonly property color borderColor: Commons.Color.menu.border
   // Faint light-grey edge for plain windows and workspace boxes.
-  readonly property color subtleBorderColor: Util.alpha(Color.menu.border, 0.3)
-  readonly property color selectedBorder: Color.menu.selectedBorder
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
-  readonly property color muted: Color.muted
+  readonly property color subtleBorderColor: Util.alpha(Commons.Color.menu.border, 0.3)
+  readonly property color selectedBorder: Commons.Color.menu.selectedBorder
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
+  readonly property color muted: Commons.Color.muted
   readonly property int cornerRadius: Style.cornerRadius
   readonly property string fontFamily: Style.font.menuFamily
-  readonly property color zebraColor: Util.alpha(Color.foreground, 0.045)
+  readonly property color zebraColor: Util.alpha(Commons.Color.foreground, 0.045)
 
   // ---- user settings ------------------------------------------------------
   // Settings live inline on this plugin's entry in ~/.config/omarchy/shell.json,
@@ -101,8 +102,8 @@ Item {
       return root.zoomLevels[s]
     case "selectedBorder":
       if (s === "accent") return root.accent
-      if (s === "selected") return Color.menu.selectedBorder
-      if (s === "foreground") return Color.foreground
+      if (s === "selected") return Commons.Color.menu.selectedBorder
+      if (s === "foreground") return Commons.Color.foreground
       if (s === "urgent") return root.urgent
       if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(s)) return s
       return undefined
@@ -1312,7 +1313,7 @@ Item {
     // Extra dimming so thumbnails read against a busy desktop.
     Rectangle {
       anchors.fill: parent
-      color: Util.alpha(Color.background, 0.55)
+      color: Util.alpha(Commons.Color.background, 0.55)
       opacity: root.zoomScrim * root.closeOpacity
     }
 
