@@ -209,7 +209,16 @@ Item {
     : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (groupCount - 1)) / groupCount))
   // Grid layout: pick the column count that gives the widest boxes for the
   // focused monitor's aspect ratio.
-  readonly property int gridHeaderHeight: Style.space(24)
+  // Grid header: the title line plus the selection underline, never less than 24.
+  readonly property int underlineHeight: Math.max(2, Style.space(2))
+  readonly property int gridHeaderHeight: Math.max(Style.space(24),
+    Math.ceil(gridTitleMetrics.height) + underlineHeight + Style.space(5))
+  FontMetrics {
+    id: gridTitleMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.title
+    font.bold: true
+  }
   readonly property var gridMetrics: {
     var mon = root.monitorLogicalRect(Hyprland.focusedMonitor)
     return Model.gridMetrics(root.groupCount, root.availWidth, root.availHeight, root.columnGap,

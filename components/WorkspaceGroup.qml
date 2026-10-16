@@ -85,6 +85,7 @@ Item {
     height: group.rows ? group.contentHeight : group.headerH
     opacity: overview.chromeOpacity
     visible: !overview.closing
+    readonly property real textPad: Style.space(4)
 
     Rectangle {
       anchors.fill: parent
@@ -102,6 +103,13 @@ Item {
       verticalItemAlignment: Grid.AlignVCenter
 
       Text {
+        id: nameText
+        // Long custom names elide so the header (and its underline) stay inside the box.
+        readonly property real room: header.width - header.textPad * 2
+          - (subText.visible ? subText.implicitWidth + headerText.columnSpacing : 0)
+          - (group.rows ? 0 : countText.implicitWidth + headerText.columnSpacing)
+        width: Math.min(implicitWidth, Math.max(0, room))
+        elide: Text.ElideRight
         text: !group.entry ? "" : group.customName ? group.entry.label + " · " + group.customName : group.entry.label
         textFormat: Text.PlainText
         color: group.focusedWorkspace ? overview.accent : overview.text
@@ -111,6 +119,7 @@ Item {
       }
 
       Text {
+        id: subText
         visible: text.length > 0
         text: group.entry ? group.entry.sub : ""
         textFormat: Text.PlainText
@@ -120,6 +129,7 @@ Item {
       }
 
       Text {
+        id: countText
         text: group.count === 1 ? "1 window" : group.count + " windows"
         color: overview.muted
         font.family: overview.fontFamily
@@ -128,20 +138,24 @@ Item {
     }
 
     // Grid: the header of the box holding the selection is underlined in the
-    // selection colour (columns/rows tint the focused workspace's header instead).
+    // selection colour; the workspace you came from keeps a faint one (columns/rows
+    // tint the focused workspace's header instead).
     Rectangle {
-      visible: group.grid && group.selectedGroup
-      readonly property real pad: Style.space(4)
-      x: headerText.x - pad
+      visible: group.grid && (group.selectedGroup || group.focusedWorkspace)
+      x: headerText.x - header.textPad
       y: headerText.y + headerText.height + Style.space(1)
-      width: headerText.width + pad * 2
-      height: Math.max(2, Style.space(2))
+      width: headerText.width + header.textPad * 2
+      height: overview.underlineHeight
       radius: height / 2
-      color: overview.selectedBorderColor
+      color: group.selectedGroup ? overview.selectedBorderColor : Util.alpha(overview.selectedBorderColor, 0.3)
     }
 
+    // Only the text is a target in grid: the rest of the strip looks like backdrop.
     MouseArea {
-      anchors.fill: parent
+      x: group.grid ? headerText.x - header.textPad : 0
+      y: 0
+      width: group.grid ? headerText.width + header.textPad * 2 : parent.width
+      height: parent.height
       cursorShape: Qt.PointingHandCursor
       onClicked: overview.focusWorkspace(group.workspace)
     }
@@ -185,10 +199,10 @@ Item {
     // Keep windows inside the box, except while they fly in from the real screen.
     clip: !overview.flying
 
+    // No box is drawn, so empty replica space reads as backdrop and closes like it.
     MouseArea {
       anchors.fill: parent
-      cursorShape: Qt.PointingHandCursor
-      onClicked: overview.focusWorkspace(group.workspace)
+      onClicked: overview.dismiss()
     }
 
     Repeater {
