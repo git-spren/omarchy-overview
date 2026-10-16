@@ -105,7 +105,8 @@ Item {
       if (s === "selected") return Commons.Color.menu.selectedBorder
       if (s === "foreground") return Commons.Color.foreground
       if (s === "urgent") return root.urgent
-      if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(s)) return s
+      // No alpha forms: Qt reads #aarrggbb (alpha first), not CSS #rrggbbaa.
+      if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(s)) return s
       return undefined
     case "layout":
       return s === "grid" || s === "rows" || s === "columns" ? s : undefined
@@ -322,6 +323,7 @@ Item {
       root.setQuery(payload.query.replace(/[\x00-\x1f\x7f]/g, ""))
     root.flyPhase = root.animate ? 1 : 2
     root.flyWaited = 0
+    flyTimer.interval = 45   // a close during the capture wait leaves it at 30
     root.opened = true
     if (root.animate) flyTimer.restart()
     // IPC data (window positions) arrives a moment later; re-sort once it does.
@@ -447,14 +449,26 @@ Item {
     }).join("; ")]
     noShareProc.running = true
   }
+  // Fails closed: answers are matched to windows by position, so a count
+  // mismatch (hyprctl failed, output changed) leaves every window unknown, and
+  // an answer that is neither a boolean nor "window not found" leaves that one
+  // unknown. Unknown windows stay uncaptured (privacyPending).
   function applyNoScreenShare(text) {
     var parts = String(text || "").split(/\n\s*\n/).map(function(p) { return p.trim() })
       .filter(function(p) { return p !== "" })
     var addrs = root.noScreenShareQuery, map = ({})
+    if (parts.length !== addrs.length) {
+      console.warn("git-spren.overview: no_screen_share query gave", parts.length,
+                   "answers for", addrs.length, "windows; not capturing them")
+      root.noScreenShare = map
+      return
+    }
     for (var i = 0; i < addrs.length; i++) {
-      var v = false
-      try { v = JSON.parse(parts[i]).no_screen_share === true } catch (e) {}   // "window not found"
-      map[addrs[i]] = v
+      if (parts[i] === "window not found") { map[addrs[i]] = false; continue }
+      var v
+      try { v = JSON.parse(parts[i]).no_screen_share } catch (e) {}
+      if (v === true || v === false) map[addrs[i]] = v
+      else console.warn("git-spren.overview: unexpected no_screen_share answer", JSON.stringify(parts[i]))
     }
     root.noScreenShare = map
   }
@@ -774,23 +788,35 @@ Item {
 
   function focusWorkspace(workspace, dismissAfter) {
     if (!workspace) return
-    var target = workspace.id > 0 ? String(workspace.id) : String(workspace.name)
+    // A bare name is a selector ("r+1", "prev", "empty", ...): named workspaces
+    // need "name:", special ones already carry "special:".
+    var name = String(workspace.name)
+    var target = workspace.id > 0 ? String(workspace.id)
+      : name.indexOf("special:") === 0 ? name : "name:" + name
     Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(target) + " })"])
     if (dismissAfter !== false) root.closeToward({ workspace: workspace, toplevel: null })
   }
 
+  // False when there is no such workspace and it cannot be created: only
+  // positive ids can (a negative number would be a relative selector).
   function focusWorkspaceById(id) {
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++)
-      if (all[i].id === id) { root.focusWorkspace(all[i]); return }
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(id) + " })"])
+      if (all[i].id === id) { root.focusWorkspace(all[i]); return true }
+    if (!(id > 0)) return false
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(String(id)) + " })"])
     root.dismissNow()
+    return true
   }
 
   function iconFor(toplevel) {
     var appId = toplevel && toplevel.wayland ? String(toplevel.wayland.appId || "") : ""
     var entry = appId ? DesktopEntries.heuristicLookup(appId) : null
-    var icon = entry && entry.icon ? String(entry.icon) : appId
+    var fromEntry = !!(entry && entry.icon)
+    var icon = fromEntry ? String(entry.icon) : appId
+    // The app id is chosen by the client (a sandboxed one too), so only a
+    // desktop entry may name an icon file by path.
+    if (icon && !fromEntry && icon.indexOf("/") >= 0) icon = ""
     if (icon) {
       if (icon.charAt(0) === "/") return Util.fileUrl(icon)
       var themed = Quickshell.iconPath(icon, true)
@@ -1004,7 +1030,8 @@ Item {
       return true
     }
     // Digits jump to a workspace until a search is under way, then they are text.
-    if (k >= Qt.Key_0 && k <= Qt.Key_9 && event.modifiers === Qt.NoModifier && root.query === "") {
+    // Keypad digits carry KeypadModifier.
+    if (k >= Qt.Key_0 && k <= Qt.Key_9 && (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && root.query === "") {
       var id = k === Qt.Key_0 ? 10 : (k - Qt.Key_0)
       root.focusWorkspaceById(id); return true
     }
@@ -1035,7 +1062,7 @@ Item {
   // Type text into the search as if it were typed (`call git-spren.overview type "fire"`).
   function type(text) {
     if (!root.opened || root.closing) return "ignored"
-    root.setQuery(root.query + String(text || ""))
+    root.setQuery(root.query + String(text || "").replace(/[\x00-\x1f\x7f]/g, ""))
     return "ok"
   }
 
@@ -1097,7 +1124,7 @@ Item {
   function workspace(name) {
     if (!root.opened || root.closing) return "ignored"
     var s = String(name || "").trim()
-    if (/^-?\d+$/.test(s)) { root.focusWorkspaceById(parseInt(s, 10)); return "ok" }
+    if (/^-?\d+$/.test(s)) return root.focusWorkspaceById(parseInt(s, 10)) ? "ok" : "unknown workspace: " + s
     var all = Hyprland.workspaces.values
     for (var i = 0; i < all.length; i++) {
       var n = String(all[i].name)
@@ -1232,7 +1259,7 @@ Item {
     }
     var next = JSON.parse(JSON.stringify(root.settings))
     for (var key in changes) {
-      if (!(key in root.settingDefaults))
+      if (!root.hasOwn(root.settingDefaults, key))
         return "unknown setting: " + key + " (known: " + Object.keys(root.settingDefaults).join(", ") + ")"
       if (root.parseSetting(key, changes[key]) === undefined)
         return "invalid value for " + key + ": " + JSON.stringify(changes[key])
@@ -1241,12 +1268,15 @@ Item {
     return root.writeSettings(next)
   }
 
+  // Own keys only: `in` would also accept "toString", "constructor", ...
+  function hasOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key) }
+
   // Drop one stored key (back to its default), or all of them with "".
   function reset(arg) {
     var key = String(arg || "").trim()
     var next = ({})
     if (key) {
-      if (!(key in root.settings)) return key in root.settingDefaults ? "ok" : "unknown setting: " + key
+      if (!root.hasOwn(root.settings, key)) return root.hasOwn(root.settingDefaults, key) ? "ok" : "unknown setting: " + key
       next = JSON.parse(JSON.stringify(root.settings))
       delete next[key]
     }
