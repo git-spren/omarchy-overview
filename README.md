@@ -21,9 +21,10 @@ https://github.com/user-attachments/assets/d0ddd1e4-f7d6-4459-a16d-9c51501c7996
   export. Windows on screen refresh 4 times a second (adjustable), windows on hidden
   workspaces are captured once when the overview opens, and nothing is captured while
   it is closed, so it costs nothing at idle.
-- **Three layouts.** The default `grid` draws one box per workspace that mirrors your
-  monitor, with each window at its real position and size. `columns` gives one column
-  per workspace, and `rows` one row per workspace.
+- **Three layouts.** The default `grid` lays out each workspace as a miniature of your
+  monitor, with each window at its real position and size, and underlines the header of
+  the workspace holding the selection. `columns` gives one column per workspace, and
+  `rows` one row per workspace. Renamed workspaces show their name next to the number.
 - **Type to search.** Printable keys start a fuzzy search over window titles, app ids
   and classes. Windows that don't match are dimmed and skipped by navigation, and the
   best match is selected, so a few letters and Enter are often all you need.

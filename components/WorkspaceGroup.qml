@@ -21,9 +21,12 @@ Item {
   readonly property var workspace: entry ? entry.workspace : null
   readonly property int count: entry ? entry.toplevels.length : 0
   readonly property bool focusedWorkspace: workspace !== null && workspace.focused
-  // The selected window lives in this group (grid: the box gets the accent outline).
+  // The selected window lives in this group (grid: its header gets the underline).
   readonly property bool selectedGroup: entry !== null && count > 0
     && overview.selectedIndex >= entry.firstIndex && overview.selectedIndex < entry.firstIndex + count
+  // A numbered workspace renamed by the user ("8" -> "Git Tools") shows both.
+  readonly property string customName: workspace && workspace.id > 0 && workspace.name
+    && workspace.name !== String(workspace.id) ? workspace.name : ""
   readonly property real gap: overview.thumbGap
 
   // ---- grid: monitor replica geometry ----
@@ -61,25 +64,17 @@ Item {
   implicitWidth: width
   implicitHeight: height
 
-  // Very faint zebra band on every other group (columns/rows) or box tint (grid).
-  // Tint and header drop when the close starts so the zoom lands on the windows;
-  // the (faint) outline stays.
+  // Columns/rows: very faint zebra band on every other group; it drops when the
+  // close starts so the zoom lands on the windows. Grid boxes get no fill or outline.
   Rectangle {
-    visible: group.grid || group.groupIndex % 2 === 1
-    x: group.grid ? 0 : -overview.columnGap / 2
-    y: group.grid ? 0 : -overview.rowGap / 2
-    width: group.grid ? parent.width : parent.width + overview.columnGap
-    height: group.grid ? parent.height : parent.height + overview.rowGap
+    visible: !group.grid && group.groupIndex % 2 === 1
+    x: -overview.columnGap / 2
+    y: -overview.rowGap / 2
+    width: parent.width + overview.columnGap
+    height: parent.height + overview.rowGap
     radius: overview.cornerRadius
     opacity: overview.chromeOpacity
-    color: overview.closing ? "transparent"
-      : group.grid && group.groupIndex % 2 === 0 ? Util.alpha(overview.zebraColor, 0.5) : overview.zebraColor
-    // Grid: accent outline on the selected box, a dim accent one on the focused
-    // workspace, a faint light-grey one on the rest.
-    border.width: group.grid ? (group.selectedGroup ? Math.max(2, Style.space(2)) : 1) : 0
-    border.color: group.grid && group.selectedGroup ? overview.selectedBorderColor
-      : group.focusedWorkspace ? Util.alpha(overview.accent, 0.6) : overview.subtleBorderColor
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    color: overview.closing ? "transparent" : overview.zebraColor
   }
 
   Item {
@@ -94,10 +89,11 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: overview.cornerRadius
-      color: group.focusedWorkspace ? Util.alpha(overview.accent, 0.18) : "transparent"
+      color: group.focusedWorkspace && !group.grid ? Util.alpha(overview.accent, 0.18) : "transparent"
     }
 
     Grid {
+      id: headerText
       anchors.centerIn: parent
       columns: group.rows ? 1 : 3
       columnSpacing: Style.space(10)
@@ -106,7 +102,7 @@ Item {
       verticalItemAlignment: Grid.AlignVCenter
 
       Text {
-        text: group.entry ? group.entry.label : ""
+        text: !group.entry ? "" : group.customName ? group.entry.label + " · " + group.customName : group.entry.label
         textFormat: Text.PlainText
         color: group.focusedWorkspace ? overview.accent : overview.text
         font.family: overview.fontFamily
@@ -129,6 +125,19 @@ Item {
         font.family: overview.fontFamily
         font.pixelSize: Style.font.caption
       }
+    }
+
+    // Grid: the header of the box holding the selection is underlined in the
+    // selection colour (columns/rows tint the focused workspace's header instead).
+    Rectangle {
+      visible: group.grid && group.selectedGroup
+      readonly property real pad: Style.space(4)
+      x: headerText.x - pad
+      y: headerText.y + headerText.height + Style.space(1)
+      width: headerText.width + pad * 2
+      height: Math.max(2, Style.space(2))
+      radius: height / 2
+      color: overview.selectedBorderColor
     }
 
     MouseArea {

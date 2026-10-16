@@ -209,7 +209,7 @@ Item {
     : Math.max(minColumnWidth, Math.min(maxColumnWidth, (availWidth - columnGap * (groupCount - 1)) / groupCount))
   // Grid layout: pick the column count that gives the widest boxes for the
   // focused monitor's aspect ratio.
-  readonly property int gridHeaderHeight: Style.space(34)
+  readonly property int gridHeaderHeight: Style.space(24)
   readonly property var gridMetrics: {
     var mon = root.monitorLogicalRect(Hyprland.focusedMonitor)
     return Model.gridMetrics(root.groupCount, root.availWidth, root.availHeight, root.columnGap,
