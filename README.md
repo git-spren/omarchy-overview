@@ -35,8 +35,14 @@ https://github.com/user-attachments/assets/d0ddd1e4-f7d6-4459-a16d-9c51501c7996
 - **Themed.** Colours come from the current Omarchy theme's menu tokens.
 - **Hide or redact windows.** Windows with the Hyprland tag `overview-hide` are left
   out; `overview-redact` keeps the window but shows a black box and the app name
-  instead of its content and title, e.g. while screen sharing (see
+  instead of its content and title, e.g. while screen sharing. Tag a window with the
+  `hide`, `redact` and `clear` commands (the focused one, an address, or a search that
+  matches exactly one window), or for good with a window rule (see
   [Hiding and redacting windows](#hiding-and-redacting-windows)).
+- **Scriptable.** Commands open the overview with a search filled in, `jump` to the best
+  match without showing it, `list` every window as JSON, and change settings with `set`
+  and `reset`, all through `omarchy-shell` and ready for key bindings (see
+  [Commands](#commands)).
 
 ### Searching
 
@@ -107,16 +113,22 @@ The overview can be scripted through the shell's IPC, e.g. from Hyprland binding
 ```sh
 omarchy-shell shell toggle git-spren.overview '{"query":"fire"}'  # open with the search filled in
 omarchy-shell shell call git-spren.overview jump "fire"           # focus the best match, no overlay
-omarchy-shell shell call git-spren.overview list ""               # every window as JSON
+omarchy-shell shell call git-spren.overview list ""               # every window as JSON, hidden ones last
 omarchy-shell shell call git-spren.overview list "fire"           # only the matches
 omarchy-shell shell call git-spren.overview workspace 3           # while open: go to a workspace (id or name)
 omarchy-shell shell call git-spren.overview select 0x55d0c1a2b3c0 # while open: select a window
+omarchy-shell shell call git-spren.overview redact ""             # tag the focused window
+omarchy-shell shell call git-spren.overview hide "keepass"        # tag the one window matching a search
+omarchy-shell shell call git-spren.overview clear 0x55d0c1a2b3c0  # remove both tags
+omarchy-shell shell call git-spren.overview set "layout=rows"     # change a setting (see Settings)
 ```
 
-`jump` and `list` work while the overview is closed and use the same fuzzy search as
-typing. Redacted windows are listed under their app name and can't be matched by
-title. The calls return `ok`, `ignored` (wrong state), `no match`, `filtered` (hidden by
-the current search) or `unknown …`.
+`jump`, `list` and the tag commands work while the overview is closed and use the same
+fuzzy search as typing. Redacted and hidden windows are listed under their app name and
+can't be matched by title. The calls return `ok`, `ignored` (wrong state), `no match`,
+`filtered` (hidden by the current search) or `unknown …`; the tag commands reply
+`ok 0x…` or say why nothing was tagged (no match, or several windows matched, with
+their addresses).
 
 ## Install
 
