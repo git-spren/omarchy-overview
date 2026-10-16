@@ -57,12 +57,23 @@ Two Hyprland window tags keep private windows out of the overview:
   with the app name instead of its title. Search only matches its app name and class,
   so typing cannot probe the title.
 
-Set either tag on one window, by address from `hyprctl clients`:
+Tag one window from a terminal or a key binding:
 
 ```sh
-hyprctl dispatch 'hl.dsp.window.tag({ tag = "+overview-redact", window = "address:0x…" })'
-hyprctl dispatch 'hl.dsp.window.tag({ tag = "-overview-redact", window = "address:0x…" })'
+omarchy-shell shell call git-spren.overview redact ""          # the focused window
+omarchy-shell shell call git-spren.overview hide "keepass"     # the one window matching a search
+omarchy-shell shell call git-spren.overview redact 0x…         # an address (from `list ""`)
+omarchy-shell shell call git-spren.overview clear "keepass"    # remove both tags
 ```
+
+A search target is matched like the search box, over every window including hidden ones,
+and must match exactly one window: when several do (two Firefox windows, say), nothing is
+tagged and the reply lists their addresses to pick from. `list ""` reports every window
+with its address, hidden ones last with `"hidden": true`. Hidden and redacted windows show
+and match on their app name and class, never their title. These tags last until the
+window closes. The commands are shortcuts for Hyprland's own
+`hyprctl dispatch 'hl.dsp.window.tag({ tag = "+overview-redact", window = "address:0x…" })'`
+(`-` removes).
 
 or for every window of an app, with a window rule in `~/.config/hypr/`:
 
@@ -176,6 +187,7 @@ omarchy-shell shell call git-spren.overview dump "" # current model as JSON
 omarchy-shell shell call git-spren.overview press down
 omarchy-shell shell call git-spren.overview type "fire"
 omarchy-shell shell call git-spren.overview config ""   # settings as JSON
+omarchy-shell shell call git-spren.overview redact ""   # tag the focused window (hide / clear too)
 qs log -p /usr/share/omarchy/shell            # shell log (QML errors, settings warnings)
 ```
 

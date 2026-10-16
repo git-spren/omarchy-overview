@@ -902,9 +902,9 @@ Item {
 
   function searchFields(toplevel) {
     if (!toplevel) return []
-    // Redacted windows match on app identity only, so typing cannot probe
-    // their titles.
-    var redacted = root.isRedacted(toplevel)
+    // Redacted (and hidden) windows match on app identity only, so typing
+    // cannot probe their titles.
+    var redacted = root.isRedacted(toplevel) || root.isHidden(toplevel)
     var f = redacted ? [root.redactedLabel(toplevel)] : [String(toplevel.title || "")]
     if (toplevel.wayland && toplevel.wayland.appId) f.push(String(toplevel.wayland.appId))
     var ipc = root.ipcOf(toplevel)
@@ -1039,27 +1039,37 @@ Item {
     return "ok"
   }
 
-  // Every shown window in overview order (works while closed), optionally only
-  // those matching a search query. Redacted windows report their app name as
-  // the title. `call git-spren.overview list "fire"`
+  // Every window (works while closed): the shown ones in overview order, then
+  // the hidden ones (`hidden: true`), optionally only those matching a search
+  // query. Redacted and hidden windows report their app name as the title.
+  // `call git-spren.overview list "fire"`
   function list(query) {
     var q = String(query || "")
     var out = []
+    function add(t, ws, hidden) {
+      if (!root.matches(t, q)) return
+      var ipc = root.ipcOf(t)
+      out.push({ address: root.addressOf(t), title: root.windowLabel(t),
+                 appId: t.wayland ? String(t.wayland.appId || "") : "",
+                 "class": ipc && ipc["class"] ? String(ipc["class"]) : "",
+                 workspace: ws ? root.workspaceLabel(ws) : "",
+                 monitor: ws && ws.monitor ? ws.monitor.name : "",
+                 active: root.isActive(t), redacted: root.isRedacted(t), hidden: hidden })
+    }
     root.orderedWorkspaces().forEach(function(g) {
-      g.toplevels.forEach(function(t) {
-        if (!root.matches(t, q)) return
-        var ipc = root.ipcOf(t)
-        var redacted = root.isRedacted(t)
-        out.push({ address: "0x" + String(t.address).replace(/^0x/, ""),
-                   title: redacted ? root.redactedLabel(t) : String(t.title || ""),
-                   appId: t.wayland ? String(t.wayland.appId || "") : "",
-                   "class": ipc && ipc["class"] ? String(ipc["class"]) : "",
-                   workspace: root.workspaceLabel(g.ws),
-                   monitor: g.ws.monitor ? g.ws.monitor.name : "",
-                   active: root.isActive(t), redacted: redacted })
-      })
+      g.toplevels.forEach(function(t) { add(t, g.ws, false) })
+    })
+    Hyprland.toplevels.values.forEach(function(t) {
+      if (root.isHidden(t)) add(t, t.workspace, true)
     })
     return JSON.stringify(out)
+  }
+
+  function addressOf(toplevel) { return "0x" + String(toplevel.address).replace(/^0x/i, "") }
+  // Title for scripting output; private windows give their app name instead.
+  function windowLabel(toplevel) {
+    return root.isRedacted(toplevel) || root.isHidden(toplevel)
+      ? root.redactedLabel(toplevel) : String(toplevel.title || "")
   }
 
   // Focus the best match for a search query, like typing it and pressing
@@ -1108,6 +1118,60 @@ Item {
       return "ok"
     }
     return "unknown window: " + address
+  }
+
+  // Tag a window from the shell: `call git-spren.overview hide ""` (the focused
+  // window), `redact 0x…` (an address) or `clear "keepass"` (best search match,
+  // hidden windows included). The tags are manual ones and last until the window
+  // closes; tags from window rules (trailing "*") cannot be cleared this way.
+  function hide(target) { return root.tagWindow(target, [root.hideTag], "+") }
+  function redact(target) { return root.tagWindow(target, [root.redactTag], "+") }
+  function clear(target) { return root.tagWindow(target, [root.hideTag, root.redactTag], "-") }
+
+  // "" = focused window, "0x…" = that address, anything else = a search over
+  // every toplevel (hidden ones too) that must match exactly one window: tagging
+  // the wrong one of two Firefox windows is worse than asking for an address.
+  // Returns { toplevel } or { error }.
+  function resolveWindow(target) {
+    var s = String(target || "").trim()
+    var all = Hyprland.toplevels.values
+    if (s === "") {
+      for (var i = 0; i < all.length; i++) if (root.isActive(all[i])) return { toplevel: all[i] }
+      return { error: "no focused window" }
+    }
+    if (/^0x[0-9a-f]+$/i.test(s)) {
+      var a = s.slice(2).toLowerCase()
+      for (var j = 0; j < all.length; j++)
+        if (String(all[j].address).replace(/^0x/i, "").toLowerCase() === a) return { toplevel: all[j] }
+      return { error: "no window: " + s }
+    }
+    var hits = all.filter(function(t) { return root.matchScore(t, s) >= 0 })
+    if (hits.length === 1) return { toplevel: hits[0] }
+    if (hits.length === 0) return { error: "no window matches: " + s }
+    return { error: hits.length + " windows match \"" + s + "\": " + hits.map(function(t) {
+      return root.addressOf(t) + " (" + root.windowLabel(t) + ")"
+    }).join(", ") + "; use an address" }
+  }
+
+  function tagWindow(target, tags, sign) {
+    if (root.closing) return "ignored"
+    var r = root.resolveWindow(target)
+    if (r.error) return r.error
+    var t = r.toplevel
+    var addr = root.addressOf(t)
+    var ruleTags = []
+    tags.forEach(function(tag) {
+      var ipcTags = (root.ipcOf(t) || {}).tags || []
+      if (sign === "-" && ipcTags.indexOf(tag + "*") !== -1) { ruleTags.push(tag); return }
+      if (sign === "-" && !root.hasTag(t, tag)) return
+      if (sign === "+" && root.hasTag(t, tag)) return
+      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.tag({ tag = "
+        + root.luaString(sign + tag) + ", window = " + root.luaString("address:" + addr) + " })"])
+    })
+    // Tag changes raise no Hyprland event, so refresh the IPC data ourselves.
+    tagTimer.restart()
+    if (ruleTags.length) return addr + ": " + ruleTags.join(", ") + " set by a window rule"
+    return "ok " + addr
   }
 
   // Current model as JSON (for debugging; "state" is taken by Item).
@@ -1284,6 +1348,10 @@ Item {
   }
 
   Timer { id: noShareTimer; interval: 150; onTriggered: root.queryNoScreenShare() }
+  // After a tag dispatch: refresh the IPC data, then rebuild once it has landed
+  // (hidden windows drop out of the model; redaction follows lastIpcObject).
+  Timer { id: tagTimer; interval: 80; onTriggered: { Hyprland.refreshToplevels(); tagSettleTimer.restart() } }
+  Timer { id: tagSettleTimer; interval: 150; onTriggered: if (root.opened && !root.closing) root.rebuild() }
   Process {
     id: noShareProc
     stdout: StdioCollector { onStreamFinished: root.applyNoScreenShare(text) }
