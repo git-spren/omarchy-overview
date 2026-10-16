@@ -1,0 +1,5 @@
+#!/bin/bash
+# Run the node tests for the pure logic in OverviewModel.js.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+for t in tests/*.test.js; do node "$t"; done

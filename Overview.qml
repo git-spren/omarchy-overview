@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
 import "components"
+import "OverviewModel.js" as Model
 
 // Exposé-style overview: every mapped window as a live thumbnail, one column
 // per occupied workspace. Hosted by omarchy-shell as an "overlay" plugin, so
@@ -85,48 +86,18 @@ Item {
   readonly property string shellConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
   // Our entry's fields (without "id"); {} = all defaults.
   property var settings: ({})
-  readonly property var settingDefaults: ({
-    zoom: "medium", selectedBorder: "accent", layout: "grid", animate: "all",
-    animationDuration: 420, closeFadeStart: 80, closeFadeEnd: 95, refreshRate: 4,
-    redactNoScreenShare: true
-  })
-  readonly property var zoomLevels: ({ small: 1.02, medium: 1.10, large: 1.20 })
+  readonly property var settingDefaults: Model.settingDefaults
 
-  // Normalised value of one setting, or undefined when `raw` is not valid for `key`.
+  // Normalised value of one setting, or undefined when `raw` is not valid for
+  // `key` (OverviewModel.js); selectedBorder palette roles become theme colours.
   function parseSetting(key, raw) {
-    var s = typeof raw === "string" ? raw.trim().toLowerCase() : ""
-    var n = (typeof raw === "number" || (typeof raw === "string" && s !== "")) ? Number(raw) : NaN
-    switch (key) {
-    case "zoom":
-      if (isFinite(n) && n >= 1 && n <= 2) return n
-      return root.zoomLevels[s]
-    case "selectedBorder":
-      if (s === "accent") return root.accent
-      if (s === "selected") return Commons.Color.menu.selectedBorder
-      if (s === "foreground") return Commons.Color.foreground
-      if (s === "urgent") return root.urgent
-      // No alpha forms: Qt reads #aarrggbb (alpha first), not CSS #rrggbbaa.
-      if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(s)) return s
-      return undefined
-    case "layout":
-      return s === "grid" || s === "rows" || s === "columns" ? s : undefined
-    case "animate":
-      if (raw === true || s === "true" || s === "on") return "current"
-      if (raw === false || s === "false" || s === "off") return "none"
-      return s === "current" || s === "all" || s === "none" ? s : undefined
-    case "animationDuration":
-      return isFinite(n) && n > 0 ? Math.max(60, Math.min(1000, Math.round(n))) : undefined
-    case "closeFadeStart":
-    case "closeFadeEnd":
-      return isFinite(n) && n >= 0 && n <= 100 ? n : undefined
-    case "refreshRate":
-      if (s === "live") return "live"
-      if (!isFinite(n) || n < 0 || n > 60) return undefined
-      return n === 0 ? 0 : Math.max(0.5, n)
-    case "redactNoScreenShare":
-      return raw === true || raw === false ? raw : undefined
-    }
-    return undefined
+    var v = Model.parseSetting(key, raw)
+    if (key !== "selectedBorder" || v === undefined) return v
+    if (v === "accent") return root.accent
+    if (v === "selected") return Commons.Color.menu.selectedBorder
+    if (v === "foreground") return Commons.Color.foreground
+    if (v === "urgent") return root.urgent
+    return v
   }
 
   // Effective value: the stored one if valid, else the default (with a warning).
@@ -194,29 +165,13 @@ Item {
   // workspace's captures, so the 1:1 start frame shows real content.
   property int flyWaited: 0
 
-  // Our entry in shell.json: plugins[] (where `omarchy plugin enable` puts an
-  // overlay), else a bar layout section.
-  function findOwnEntry(config) {
-    if (!config || typeof config !== "object") return null
-    var lists = [config.plugins]
-    var layout = config.bar && config.bar.layout
-    if (layout) lists.push(layout.left, layout.center, layout.right)
-    for (var l = 0; l < lists.length; l++) {
-      var list = lists[l]
-      if (!Array.isArray(list)) continue
-      for (var i = 0; i < list.length; i++)
-        if (list[i] && list[i].id === root.pluginId) return list[i]
-    }
-    return null
-  }
-
   function applyShellConfig(text) {
     var config
     try { config = JSON.parse(String(text || "")) } catch (e) {
       console.warn("git-spren.overview: cannot parse " + root.shellConfigPath + ":", e)
       return   // keep the last good settings
     }
-    var entry = root.findOwnEntry(config)
+    var entry = Model.findOwnEntry(config, root.pluginId)
     var next = ({})
     if (entry) for (var k in entry) if (k !== "id") next[k] = entry[k]
     if (JSON.stringify(next) !== JSON.stringify(root.settings)) root.settings = next
@@ -256,19 +211,9 @@ Item {
   // focused monitor's aspect ratio.
   readonly property int gridHeaderHeight: Style.space(34)
   readonly property var gridMetrics: {
-    var n = root.groupCount
-    if (n === 0) return { cols: 1, boxW: 0 }
     var mon = root.monitorLogicalRect(Hyprland.focusedMonitor)
-    var aspect = mon.h > 0 ? mon.w / mon.h : 16 / 9
-    var best = null
-    for (var cols = 1; cols <= n; cols++) {
-      var rows = Math.ceil(n / cols)
-      var w = (root.availWidth - root.columnGap * (cols - 1)) / cols
-      var h = (root.availHeight - root.rowGap * (rows - 1)) / rows - root.gridHeaderHeight
-      var boxW = Math.max(0, Math.min(w, h * aspect))
-      if (!best || boxW > best.boxW) best = { cols: cols, boxW: boxW }
-    }
-    return best
+    return Model.gridMetrics(root.groupCount, root.availWidth, root.availHeight, root.columnGap,
+                             root.rowGap, root.gridHeaderHeight, mon.h > 0 ? mon.w / mon.h : 16 / 9)
   }
 
   // Logical size and origin of a HyprlandMonitor (falls back to the overlay's own size).
@@ -417,10 +362,7 @@ Item {
 
   function hasTag(toplevel, tag) {
     var ipc = root.ipcOf(toplevel)
-    var tags = ipc && ipc.tags ? ipc.tags : []
-    for (var i = 0; i < tags.length; i++)
-      if (String(tags[i]).replace(/\*$/, "") === tag) return true
-    return false
+    return Model.hasTag(ipc ? ipc.tags : null, tag)
   }
 
   function isHidden(toplevel) { return root.hasTag(toplevel, root.hideTag) }
@@ -449,28 +391,12 @@ Item {
     }).join("; ")]
     noShareProc.running = true
   }
-  // Fails closed: answers are matched to windows by position, so a count
-  // mismatch (hyprctl failed, output changed) leaves every window unknown, and
-  // an answer that is neither a boolean nor "window not found" leaves that one
-  // unknown. Unknown windows stay uncaptured (privacyPending).
+  // Fails closed (OverviewModel.js): windows without a clear answer stay
+  // unknown, and unknown windows stay uncaptured (privacyPending).
   function applyNoScreenShare(text) {
-    var parts = String(text || "").split(/\n\s*\n/).map(function(p) { return p.trim() })
-      .filter(function(p) { return p !== "" })
-    var addrs = root.noScreenShareQuery, map = ({})
-    if (parts.length !== addrs.length) {
-      console.warn("git-spren.overview: no_screen_share query gave", parts.length,
-                   "answers for", addrs.length, "windows; not capturing them")
-      root.noScreenShare = map
-      return
-    }
-    for (var i = 0; i < addrs.length; i++) {
-      if (parts[i] === "window not found") { map[addrs[i]] = false; continue }
-      var v
-      try { v = JSON.parse(parts[i]).no_screen_share } catch (e) {}
-      if (v === true || v === false) map[addrs[i]] = v
-      else console.warn("git-spren.overview: unexpected no_screen_share answer", JSON.stringify(parts[i]))
-    }
-    root.noScreenShare = map
+    var r = Model.parseNoScreenShare(text, root.noScreenShareQuery)
+    r.warnings.forEach(function(w) { console.warn("git-spren.overview: " + w) })
+    root.noScreenShare = r.map
   }
 
   // Caption for a redacted window: the app's name, never its title.
@@ -736,28 +662,13 @@ Item {
 
   // ---- actions -----------------------------------------------------------
 
-  // Quote a value as a Lua string literal for the Lua-mode dispatcher.
-  // execDetached skips the shell, but Hyprland still parses the argument as
-  // Lua, and special workspace names are free text, so `"`, `\\` and every
-  // control character (incl. newlines, which would also end the hyprctl
-  // request) are escaped as \ddd (three digits so a following digit cannot
-  // be absorbed).
-  function luaString(value) {
-    var s = String(value === undefined || value === null ? "" : value)
-    return "\"" + s.replace(/[\\"\x00-\x1f\x7f]/g, function(c) {
-      if (c === "\\") return "\\\\"
-      if (c === "\"") return "\\\""
-      return "\\" + ("00" + c.charCodeAt(0)).slice(-3)
-    }) + "\""
-  }
-
   // Hyprland ignores foreign-toplevel activate requests unless
   // misc:focus_on_activate is set, so focus through the dispatcher instead.
   function focusCommand(toplevel) {
     var addr = String(toplevel && toplevel.address || "")
     if (addr.length === 0) return null
     if (addr.indexOf("0x") !== 0) addr = "0x" + addr
-    return ["hyprctl", "dispatch", "hl.dsp.focus({ window = " + root.luaString("address:" + addr) + " })"]
+    return ["hyprctl", "dispatch", "hl.dsp.focus({ window = " + Model.luaString("address:" + addr) + " })"]
   }
 
   function activate(toplevel) {
@@ -793,7 +704,7 @@ Item {
     var name = String(workspace.name)
     var target = workspace.id > 0 ? String(workspace.id)
       : name.indexOf("special:") === 0 ? name : "name:" + name
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(target) + " })"])
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + Model.luaString(target) + " })"])
     if (dismissAfter !== false) root.closeToward({ workspace: workspace, toplevel: null })
   }
 
@@ -804,7 +715,7 @@ Item {
     for (var i = 0; i < all.length; i++)
       if (all[i].id === id) { root.focusWorkspace(all[i]); return true }
     if (!(id > 0)) return false
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + root.luaString(String(id)) + " })"])
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + Model.luaString(String(id)) + " })"])
     root.dismissNow()
     return true
   }
@@ -868,9 +779,7 @@ Item {
     if (i >= 0) root.thumbItems.splice(i, 1)
   }
 
-  // Candidates are ranked in tiers: ahead on the same line, then wrap on the
-  // same line (farthest behind), then ahead on another line, then wrap there.
-  // "Same line" means the frames overlap on the axis perpendicular to the move.
+  // Nearest match in a direction by on-screen frame (OverviewModel.pickSpatial).
   function spatialMove(dx, dy) {
     root.selectionTouched = true
     if (root.flat.length === 0) return
@@ -878,30 +787,13 @@ Item {
       return t && t.flatIndex >= 0 && t.flatIndex < root.flat.length
         && (root.isMatch(t.flatIndex) || t.flatIndex === root.selectedIndex)
     })
-    var cur = null
+    var frames = items.map(function(t) { return t.frameGeometry() })
+    var cur = -1
     for (var i = 0; i < items.length; i++)
-      if (items[i].flatIndex === root.selectedIndex) { cur = items[i]; break }
-    if (!cur) { root.selectedIndex = items.length ? items[0].flatIndex : 0; return }
-    var c = cur.frameGeometry()
-    var best = [null, null, null, null], bestScore = [Infinity, Infinity, Infinity, Infinity]
-    for (var k = 0; k < items.length; k++) {
-      var t = items[k]
-      if (t === cur) continue
-      var g = t.frameGeometry()
-      var ddx = g.cx - c.cx, ddy = g.cy - c.cy
-      var primary = ddx * dx + ddy * dy                         // along the direction
-      var secondary = Math.abs(ddx * dy) + Math.abs(ddy * dx)   // off-axis drift
-      if (Math.abs(primary) <= 1) continue
-      var sameLine = dx !== 0
-        ? (g.y < c.y + c.h && g.y + g.h > c.y)
-        : (g.x < c.x + c.w && g.x + g.w > c.x)
-      var ahead = primary > 0
-      var tier = sameLine ? (ahead ? 0 : 1) : (ahead ? 2 : 3)
-      var score = ahead ? primary + 1.5 * secondary : 1.5 * secondary - Math.abs(primary)
-      if (score < bestScore[tier]) { bestScore[tier] = score; best[tier] = t }
-    }
-    for (var tr = 0; tr < 4; tr++)
-      if (best[tr]) { root.selectedIndex = best[tr].flatIndex; return }
+      if (items[i].flatIndex === root.selectedIndex) { cur = i; break }
+    if (cur < 0) { root.selectedIndex = items.length ? items[0].flatIndex : 0; return }
+    var pick = Model.pickSpatial(frames, frames[cur], dx, dy)
+    if (pick >= 0) root.selectedIndex = items[pick].flatIndex
   }
 
   function stepSelection(delta) {
@@ -942,35 +834,10 @@ Item {
     return f
   }
 
-  function wordStart(h, i) { return i === 0 || /[^a-z0-9]/.test(h.charAt(i - 1)) }
-
-  // Score of `needle` (lower case) in `hay`, or -1. Substrings beat scattered
-  // subsequences; word starts and consecutive runs score higher.
-  function fuzzyScore(needle, hay) {
-    var h = hay.toLowerCase()
-    var at = h.indexOf(needle)
-    if (at >= 0) return 1000 + (root.wordStart(h, at) ? 200 : 0) - Math.min(at, 100)
-    var score = 0, j = 0, prev = -2
-    for (var i = 0; i < h.length && j < needle.length; i++) {
-      if (h.charAt(i) !== needle.charAt(j)) continue
-      score += i === prev + 1 ? 10 : root.wordStart(h, i) ? 8 : 1
-      prev = i; j++
-    }
-    return j === needle.length ? score : -1
-  }
-
+  // Fuzzy scoring lives in OverviewModel.js; -1 = no match, 0 = empty query.
   function matchScore(toplevel, query) {
-    var tokens = String(query).toLowerCase().split(/\s+/).filter(function(t) { return t.length > 0 })
-    if (tokens.length === 0) return 0
-    var fields = root.searchFields(toplevel)
-    var total = 0
-    for (var t = 0; t < tokens.length; t++) {
-      var best = -1
-      for (var f = 0; f < fields.length; f++) best = Math.max(best, root.fuzzyScore(tokens[t], fields[f]))
-      if (best < 0) return -1
-      total += best
-    }
-    return total
+    if (String(query).trim() === "") return 0
+    return Model.matchScore(root.searchFields(toplevel), query)
   }
 
   function matches(toplevel, query) { return query === "" || root.matchScore(toplevel, query) >= 0 }
@@ -1004,12 +871,10 @@ Item {
     if (root.closing) { if (k === Qt.Key_Escape) root.finishClose(); return true }
     var mods = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
     if (k === Qt.Key_Escape) { if (root.query !== "") root.setQuery(""); else root.dismiss(); return true }
-    if (k === Qt.Key_Backspace) {
-      if (mods & Qt.ControlModifier) root.setQuery(root.query.replace(/\S*\s*$/, ""))
-      else root.setQuery(root.query.slice(0, -1))
-      return true
-    }
-    if (k === Qt.Key_U && mods === Qt.ControlModifier) { root.setQuery(""); return true }
+    // Backspace / Ctrl+Backspace / Ctrl+U, shared with the shell's own search
+    // overlays; Backspace on an empty query is swallowed.
+    if (Util.editsFilter(event, root.query)) { root.setQuery(Util.editedFilter(event, root.query)); return true }
+    if (k === Qt.Key_Backspace) return true
     // Grid: spatial, by on-screen position. Columns: left/right = other
     // workspace, up/down = within it. Rows: transposed.
     if (root.layoutGrid) {
@@ -1193,7 +1058,7 @@ Item {
       if (sign === "-" && !root.hasTag(t, tag)) return
       if (sign === "+" && root.hasTag(t, tag)) return
       Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.tag({ tag = "
-        + root.luaString(sign + tag) + ", window = " + root.luaString("address:" + addr) + " })"])
+        + Model.luaString(sign + tag) + ", window = " + Model.luaString("address:" + addr) + " })"])
     })
     // Tag changes raise no Hyprland event, so refresh the IPC data ourselves.
     tagTimer.restart()
@@ -1243,20 +1108,9 @@ Item {
 
   // "key=value" (value parsed as JSON, else taken as a string) or a JSON object.
   function set(arg) {
-    var text = String(arg || "").trim()
-    var changes = null
-    if (text.charAt(0) === "{") {
-      try { changes = JSON.parse(text) } catch (e) { return "invalid JSON: " + e }
-      if (!changes || typeof changes !== "object" || Array.isArray(changes)) return "expected a JSON object"
-    } else {
-      var eq = text.indexOf("=")
-      if (eq <= 0) return "usage: set key=value | set '{\"key\": value}'"
-      var raw = text.slice(eq + 1).trim()
-      var value
-      try { value = JSON.parse(raw) } catch (e) { value = raw }
-      changes = ({})
-      changes[text.slice(0, eq).trim()] = value
-    }
+    var parsed = Model.parseSetArgument(arg)
+    if (parsed.error) return parsed.error
+    var changes = parsed.changes
     var next = JSON.parse(JSON.stringify(root.settings))
     for (var key in changes) {
       if (!root.hasOwn(root.settingDefaults, key))
@@ -1268,8 +1122,7 @@ Item {
     return root.writeSettings(next)
   }
 
-  // Own keys only: `in` would also accept "toString", "constructor", ...
-  function hasOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key) }
+  function hasOwn(obj, key) { return Model.hasOwn(obj, key) }
 
   // Drop one stored key (back to its default), or all of them with "".
   function reset(arg) {
