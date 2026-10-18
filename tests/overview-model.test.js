@@ -46,6 +46,9 @@ test("parseSetting: refreshRate and redactNoScreenShare", () => {
   assert.equal(M.parseSetting("refreshRate", 61), undefined)
   assert.equal(M.parseSetting("redactNoScreenShare", false), false)
   assert.equal(M.parseSetting("redactNoScreenShare", "false"), undefined)
+  assert.equal(M.parseSetting("backdrop", "Wallpaper"), "wallpaper")
+  assert.equal(M.parseSetting("backdrop", "dim"), "dim")
+  assert.equal(M.parseSetting("backdrop", "black"), undefined)
   assert.equal(M.parseSetting("nope", 1), undefined)
 })
 

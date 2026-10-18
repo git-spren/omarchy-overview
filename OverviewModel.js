@@ -5,8 +5,8 @@
 
 var settingDefaults = {
   zoom: "medium", selectedBorder: "accent", layout: "grid", animate: "all",
-  animationDuration: 420, closeFadeStart: 80, closeFadeEnd: 95, refreshRate: 4,
-  redactNoScreenShare: true
+  animationDuration: 350, closeFadeStart: 80, closeFadeEnd: 95, refreshRate: 4,
+  redactNoScreenShare: true, backdrop: "wallpaper"
 }
 
 var zoomLevels = { small: 1.02, medium: 1.10, large: 1.20 }
@@ -47,6 +47,8 @@ function parseSetting(key, raw) {
     return n === 0 ? 0 : Math.max(0.5, n)
   case "redactNoScreenShare":
     return raw === true || raw === false ? raw : undefined
+  case "backdrop":
+    return s === "wallpaper" || s === "dim" ? s : undefined
   }
   return undefined
 }

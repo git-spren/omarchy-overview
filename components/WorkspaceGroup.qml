@@ -93,6 +93,23 @@ Item {
       color: group.focusedWorkspace && !group.grid ? Util.alpha(overview.accent, 0.18) : "transparent"
     }
 
+    // Wallpaper backdrop: a pill in the menu surface colour behind the header
+    // text (and the grid underline), so it reads on a busy image.
+    Rectangle {
+      visible: overview.backdropWallpaper
+      readonly property real padX: Style.space(group.grid ? 8 : 12)
+      readonly property real padY: Style.space(group.grid ? 2 : 6)
+      x: Math.max(0, headerText.x - padX)
+      y: Math.max(0, headerText.y - padY)
+      width: Math.min(header.width - x, headerText.width + padX * 2)
+      height: group.grid ? header.height - y - Style.space(3)
+            : Math.min(header.height - y, headerText.height + padY * 2)
+      radius: Math.min(height / 2, overview.cornerRadius + Style.space(4))
+      color: Util.alpha(overview.surface, 0.82)
+      border.width: 1
+      border.color: overview.subtleBorderColor
+    }
+
     Grid {
       id: headerText
       anchors.centerIn: parent

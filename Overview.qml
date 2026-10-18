@@ -73,7 +73,7 @@ Item {
   //                   window) and zooms into view | "current" (true) - windows of the
   //                   current workspace fly from their real place on screen into their
   //                   thumbnail slot | "none" (false)
-  //   animationDuration: milliseconds for that animation (default 420, 60-1000)
+  //   animationDuration: milliseconds for that animation (default 350, 60-1000)
   //   closeFadeStart / closeFadeEnd: when the close fades the overlay out, in percent
   //                   of animationDuration (default 80 / 95, 0-100); the overlay is
   //                   gone at closeFadeEnd
@@ -83,6 +83,8 @@ Item {
   //                   Windows on hidden workspaces are captured once at open.
   //   redactNoScreenShare: true (default) - windows with Hyprland's no_screen_share
   //                   window-rule property are redacted like overview-redact | false
+  //   backdrop:       "wallpaper" (default) - the desktop background behind the
+  //                   thumbnails, lightly dimmed | "dim" - the dark menu scrim
   readonly property string shellConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
   // Our entry's fields (without "id"); {} = all defaults.
   property var settings: ({})
@@ -129,6 +131,12 @@ Item {
     : Math.round(1000 / root.refreshRate)
   property int captureTick: 0
   readonly property bool redactNoScreenShare: root.setting("redactNoScreenShare")
+  readonly property bool backdropWallpaper: root.setting("backdrop") === "wallpaper"
+  // Omarchy's current background (the link omarchy-theme-bg-set points); resolved
+  // so the Image shares the pixmap cache with the shell's own background layer.
+  readonly property string wallpaperLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
+  property string wallpaperPath: ""
+  function refreshWallpaper() { if (!wallpaperProc.running) wallpaperProc.running = true }
   readonly property real closeFadeEndPct: root.setting("closeFadeEnd")
   readonly property real closeFadeStartPct: Math.min(root.setting("closeFadeStart"), root.closeFadeEndPct)
 
@@ -153,6 +161,10 @@ Item {
   property var closeTarget: null
   // Window focus dispatch to repeat once the layer is unmapped (see activate()).
   property var pendingFocus: null
+  // Address (no 0x) the pendingFocus command targets, and how many times the
+  // close has put focus back on it (see onRawEvent).
+  property string pendingFocusAddress: ""
+  property int refocusCount: 0
   // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
   property real zoomScale: 1
   property real zoomTX: 0
@@ -211,8 +223,9 @@ Item {
   // focused monitor's aspect ratio.
   // Grid header: the title line plus the selection underline, never less than 24.
   readonly property int underlineHeight: Math.max(2, Style.space(2))
+  // The wallpaper backdrop puts a pill behind the header; give it some air.
   readonly property int gridHeaderHeight: Math.max(Style.space(24),
-    Math.ceil(gridTitleMetrics.height) + underlineHeight + Style.space(5))
+    Math.ceil(gridTitleMetrics.height) + underlineHeight + Style.space(root.backdropWallpaper ? 10 : 5))
   FontMetrics {
     id: gridTitleMetrics
     font.family: root.fontFamily
@@ -262,6 +275,7 @@ Item {
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
     root.queryNoScreenShare()
+    root.refreshWallpaper()
     root.selectionTouched = false
     root.hoverArmed = false
     root.hoverOrigin = null
@@ -276,6 +290,9 @@ Item {
     if (payload && typeof payload.query === "string")
       root.setQuery(payload.query.replace(/[\x00-\x1f\x7f]/g, ""))
     root.flyPhase = root.animate ? 1 : 2
+    // "all" fades the backdrop in with the zoom; without this the capture wait
+    // (phase 1, up to 300 ms) shows it at full strength over the live desktop.
+    root.zoomScrim = root.animateAll ? 0 : 1
     root.flyWaited = 0
     flyTimer.interval = 45   // a close during the capture wait leaves it at 30
     root.opened = true
@@ -291,6 +308,11 @@ Item {
     if (!root.opened) return
     if (root.closing || !root.animate || root.flyPhase < 2) { root.finishClose(); return }
     root.closing = true
+    // The layer lets go of the keyboard now (keyboardFocus), and Hyprland hands
+    // it back to the window focused before the overlay: focus the chosen one again
+    // so it turns active (opaque, with inactive_opacity / opacity rules) under the
+    // overlay instead of snapping opaque after the fade. finishClose() repeats it.
+    if (root.pendingFocus) refocusTimer.restart()
     flyTimer.stop(); flyEndTimer.stop(); settleTimer.stop(); rebuildTimer.stop()
     if (root.animateAll) {
       root.startZoomBack()
@@ -690,6 +712,8 @@ Item {
       // before. A workspace switch hides that, a window on the current
       // workspace does not, so focus again once the layer is gone.
       root.pendingFocus = cmd
+      root.pendingFocusAddress = String(toplevel.address).replace(/^0x/, "")
+      root.refocusCount = 0
     } else if (toplevel.wayland) {
       toplevel.wayland.activate()
     } else if (toplevel.workspace) {
@@ -1098,6 +1122,7 @@ Item {
                             animate: root.animateMode, animationDuration: root.animationMs,
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
                             refreshRate: root.refreshRate, redactNoScreenShare: root.redactNoScreenShare,
+                            backdrop: root.setting("backdrop"), wallpaper: root.wallpaperPath,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
@@ -1191,6 +1216,7 @@ Item {
     id: refocusTimer; interval: 60
     onTriggered: {
       var cmd = root.pendingFocus
+      if (root.closing) { if (cmd) Quickshell.execDetached(cmd); return }
       root.pendingFocus = null
       if (cmd && !root.opened) Quickshell.execDetached(cmd)
     }
@@ -1234,6 +1260,15 @@ Item {
       var name = String(event.name)
       if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|activewindow(v2)?|changefloatingmode|fullscreen)$/.test(name))
         root.scheduleRebuild()
+      // The close released the keyboard and Hyprland moved focus back to the
+      // window from before the overlay (which can switch workspace): put it on
+      // the chosen window again while the overlay still covers the screen.
+      if (name === "activewindowv2" && root.closing && root.pendingFocus
+          && String(event.data).replace(/^0x/, "") !== root.pendingFocusAddress
+          && root.refocusCount < 3) {
+        root.refocusCount += 1
+        Quickshell.execDetached(root.pendingFocus)
+      }
       // Window rules (and so no_screen_share) can match on title.
       if (/^(openwindow|closewindow|windowtitle(v2)?)$/.test(name)) noShareTimer.restart()
     }
@@ -1250,7 +1285,13 @@ Item {
   }
   // Fetch IPC data (focus history, positions, tags) up front, so `list` and
   // `jump` are right even before the first window event or open.
-  Component.onCompleted: { noShareTimer.restart(); refreshTimer.restart() }
+  Component.onCompleted: { noShareTimer.restart(); refreshTimer.restart(); root.refreshWallpaper() }
+
+  Process {
+    id: wallpaperProc
+    command: ["readlink", "-f", root.wallpaperLink]
+    stdout: StdioCollector { onStreamFinished: root.wallpaperPath = String(text || "").trim() }
+  }
   onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryNoScreenShare()
 
   PanelWindow {
@@ -1261,143 +1302,181 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "git-spren-overview"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // Released as soon as the close starts, so the chosen window gets focus (and
+    // its active opacity) while still hidden under the overlay; see close().
+    WlrLayershell.keyboardFocus: root.closing ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
-    Rectangle {
-      anchors.fill: parent
-      color: root.scrim
-      opacity: root.zoomScrim * root.closeOpacity
-    }
-
-    // Extra dimming so thumbnails read against a busy desktop.
-    Rectangle {
-      anchors.fill: parent
-      color: Util.alpha(Commons.Color.background, 0.55)
-      opacity: root.zoomScrim * root.closeOpacity
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      onClicked: root.dismiss()
-    }
-
+    // Everything fades out as one layer at the end of the close: faded item by
+    // item, the backdrop would show through every half-transparent thumbnail.
     Item {
-      id: keyCatcher
       anchors.fill: parent
-      focus: true
-      Keys.priority: Keys.BeforeItem
-      Keys.onPressed: function(event) { event.accepted = root.handleKey(event) }
+      opacity: root.closeOpacity
+      layer.enabled: root.closing
 
+      // Backdrop "wallpaper": the desktop background, dimmed a little so headers
+      // and thumbnail edges stay readable on a bright image. It is the same image
+      // the desktop shows (same crop), so it appears at once with the content and
+      // only the dim follows the zoom: the close then lands on exactly what the
+      // desktop shows, and the overlay's final fade has nothing to cross over.
       Item {
-        id: content
         anchors.fill: parent
-        // "all": stay hidden until the zoom starts (phase 2), then appear at once.
-        opacity: (root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0) * root.closeOpacity
-        Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-        transform: [
-          Scale { origin.x: 0; origin.y: 0; xScale: root.zoomScale; yScale: root.zoomScale },
-          Translate { x: root.zoomTX; y: root.zoomTY }
-        ]
+        visible: root.backdropWallpaper && wallpaper.status === Image.Ready
+        opacity: root.opened && root.flyPhase >= 2 ? 1 : 0
 
-        Text {
-          visible: root.groupCount === 0
-          anchors.centerIn: parent
-          text: "No windows open"
-          color: root.text
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.title
+        Image {
+          id: wallpaper
+          anchors.fill: parent
+          source: root.backdropWallpaper ? Util.fileUrl(root.wallpaperPath) : ""
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+          cache: true
         }
-
-        Grid {
-          id: groupsGrid
-          anchors.centerIn: parent
-          columns: root.layoutGrid ? root.gridMetrics.cols
-                 : root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
-          // Only the rows layout needs an explicit row count (it flows top to
-          // bottom); elsewhere Grid derives rows from columns, which avoids a
-          // transient "more items than rows*columns" warning on layout changes.
-          rows: root.layoutRows ? Math.max(1, root.rowsPerColumn) : -1
-          flow: root.layoutRows ? Grid.TopToBottom : Grid.LeftToRight
-          columnSpacing: root.columnGap
-          rowSpacing: root.rowGap
-          verticalItemAlignment: root.layoutRows || root.layoutGrid ? Grid.AlignVCenter : Grid.AlignTop
-          horizontalItemAlignment: root.layoutRows ? Grid.AlignLeft : Grid.AlignHCenter
-
-          Repeater {
-            id: groupRepeater
-            model: root.groups
-
-            WorkspaceGroup {
-              required property var modelData
-              required property int index
-              overview: root
-              entry: modelData
-              groupIndex: index
-              mode: root.layoutMode
-              groupWidth: root.layoutGrid ? root.gridMetrics.boxW : root.layoutRows ? root.rowWidth : root.columnWidth
-              groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
-            }
-          }
+        Rectangle {
+          anchors.fill: parent
+          color: Util.alpha(Commons.Color.background, 0.35)
+          opacity: root.zoomScrim
         }
       }
 
-      // Search field: appears once you type, centred in the top margin.
+      // Backdrop "dim" (and the wallpaper's fallback until it has loaded).
       Rectangle {
-        id: searchPill
-        readonly property bool shown: root.query !== ""
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: Math.max(Style.space(8), (root.outerMargin - height) / 2)
-        width: Math.min(parent.width - Style.space(32), Math.max(Style.space(280), searchRow.implicitWidth + Style.space(32)))
-        height: searchRow.implicitHeight + Style.space(14)
-        radius: height / 2
-        color: Util.alpha(root.surface, 0.92)
-        border.width: Math.max(1, Style.space(1))
-        border.color: root.matchCount === 0 ? root.urgent : root.selectedBorderColor
-        opacity: (shown ? 1 : 0) * root.closeOpacity * root.chromeOpacity
-        visible: opacity > 0
-        Behavior on opacity { enabled: !root.closing; NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
+        anchors.fill: parent
+        visible: !root.backdropWallpaper || wallpaper.status !== Image.Ready
+        color: root.scrim
+        opacity: root.zoomScrim
+      }
 
-        Row {
-          id: searchRow
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.leftMargin: Style.space(16)
-          anchors.rightMargin: Style.space(16)
-          spacing: Style.space(10)
+      // Extra dimming so thumbnails read against a busy desktop.
+      Rectangle {
+        anchors.fill: parent
+        visible: !root.backdropWallpaper || wallpaper.status !== Image.Ready
+        color: Util.alpha(Commons.Color.background, 0.55)
+        opacity: root.zoomScrim
+      }
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.dismiss()
+      }
+
+      Item {
+        id: keyCatcher
+        anchors.fill: parent
+        focus: true
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) { event.accepted = root.handleKey(event) }
+
+        Item {
+          id: content
+          anchors.fill: parent
+          // "all": stay hidden until the zoom starts (phase 2), then appear at once.
+          opacity: root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0
+          Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+          transform: [
+            Scale { origin.x: 0; origin.y: 0; xScale: root.zoomScale; yScale: root.zoomScale },
+            Translate { x: root.zoomTX; y: root.zoomTY }
+          ]
 
           Text {
-            id: queryText
-            width: Math.min(implicitWidth + caret.width + Style.space(2), searchRow.width - countText.implicitWidth - searchRow.spacing * 2)
-            rightPadding: caret.width + Style.space(2)
-            text: root.query
-            textFormat: Text.PlainText
-            elide: Text.ElideLeft
+            visible: root.groupCount === 0
+            anchors.centerIn: parent
+            text: "No windows open"
             color: root.text
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
+          }
 
-            // Caret right after the last glyph (a Row sibling would get the row spacing).
-            Rectangle {
-              id: caret
-              x: Math.min(queryText.contentWidth, queryText.width - queryText.rightPadding) + Style.space(1)
-              anchors.verticalCenter: parent.verticalCenter
-              width: Math.max(2, Style.space(2)); height: queryText.implicitHeight * 0.8
-              color: root.text
+          Grid {
+            id: groupsGrid
+            anchors.centerIn: parent
+            columns: root.layoutGrid ? root.gridMetrics.cols
+                   : root.layoutRows ? root.rowColumns : Math.max(1, root.groupCount)
+            // Only the rows layout needs an explicit row count (it flows top to
+            // bottom); elsewhere Grid derives rows from columns, which avoids a
+            // transient "more items than rows*columns" warning on layout changes.
+            rows: root.layoutRows ? Math.max(1, root.rowsPerColumn) : -1
+            flow: root.layoutRows ? Grid.TopToBottom : Grid.LeftToRight
+            columnSpacing: root.columnGap
+            rowSpacing: root.rowGap
+            verticalItemAlignment: root.layoutRows || root.layoutGrid ? Grid.AlignVCenter : Grid.AlignTop
+            horizontalItemAlignment: root.layoutRows ? Grid.AlignLeft : Grid.AlignHCenter
+
+            Repeater {
+              id: groupRepeater
+              model: root.groups
+
+              WorkspaceGroup {
+                required property var modelData
+                required property int index
+                overview: root
+                entry: modelData
+                groupIndex: index
+                mode: root.layoutMode
+                groupWidth: root.layoutGrid ? root.gridMetrics.boxW : root.layoutRows ? root.rowWidth : root.columnWidth
+                groupHeight: root.layoutRows ? root.rowHeight : root.availHeight
+              }
             }
           }
-          Item {
-            width: Math.max(0, searchRow.width - queryText.width - countText.implicitWidth - searchRow.spacing * 2)
-            height: 1
-          }
-          Text {
-            id: countText
+        }
+
+        // Search field: appears once you type, centred in the top margin.
+        Rectangle {
+          id: searchPill
+          readonly property bool shown: root.query !== ""
+          anchors.horizontalCenter: parent.horizontalCenter
+          y: Math.max(Style.space(8), (root.outerMargin - height) / 2)
+          width: Math.min(parent.width - Style.space(32), Math.max(Style.space(280), searchRow.implicitWidth + Style.space(32)))
+          height: searchRow.implicitHeight + Style.space(14)
+          radius: height / 2
+          color: Util.alpha(root.surface, 0.92)
+          border.width: Math.max(1, Style.space(1))
+          border.color: root.matchCount === 0 ? root.urgent : root.selectedBorderColor
+          opacity: (shown ? 1 : 0) * root.chromeOpacity
+          visible: opacity > 0
+          Behavior on opacity { enabled: !root.closing; NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
+
+          Row {
+            id: searchRow
             anchors.verticalCenter: parent.verticalCenter
-            text: root.matchCount === 0 ? "no match" : root.matchCount + " / " + root.flat.length
-            color: root.matchCount === 0 ? root.urgent : root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: Style.space(16)
+            anchors.rightMargin: Style.space(16)
+            spacing: Style.space(10)
+
+            Text {
+              id: queryText
+              width: Math.min(implicitWidth + caret.width + Style.space(2), searchRow.width - countText.implicitWidth - searchRow.spacing * 2)
+              rightPadding: caret.width + Style.space(2)
+              text: root.query
+              textFormat: Text.PlainText
+              elide: Text.ElideLeft
+              color: root.text
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+
+              // Caret right after the last glyph (a Row sibling would get the row spacing).
+              Rectangle {
+                id: caret
+                x: Math.min(queryText.contentWidth, queryText.width - queryText.rightPadding) + Style.space(1)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.max(2, Style.space(2)); height: queryText.implicitHeight * 0.8
+                color: root.text
+              }
+            }
+            Item {
+              width: Math.max(0, searchRow.width - queryText.width - countText.implicitWidth - searchRow.spacing * 2)
+              height: 1
+            }
+            Text {
+              id: countText
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.matchCount === 0 ? "no match" : root.matchCount + " / " + root.flat.length
+              color: root.matchCount === 0 ? root.urgent : root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
         }
       }

@@ -185,8 +185,9 @@ Disabling the plugin removes its entry, and its settings with it.
 | `zoom` | selected-thumbnail zoom in columns/rows: `"small"`, `"medium"`, `"large"` or a number 1.0–2.0 | `"medium"` |
 | `selectedBorder` | `"accent"`, `"selected"`, `"foreground"`, `"urgent"` or `"#rrggbb"` | `"accent"` |
 | `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
-| `animationDuration` | milliseconds, 60–1000 | `420` |
+| `animationDuration` | milliseconds, 60–1000 | `350` |
 | `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `80` / `95` |
+| `backdrop` | `"wallpaper"` (the desktop background, lightly dimmed) or `"dim"` (a dark scrim over the desktop) | `"wallpaper"` |
 | `redactNoScreenShare` | redact windows with Hyprland's `no_screen_share` property, like `overview-redact` (`true` or `false`) | `true` |
 | `refreshRate` | thumbnail refreshes per second for windows on visible workspaces (0.5–60), `0` for one snapshot at open, or `"live"` for every frame (heavy on the GPU) | `4` |
 
