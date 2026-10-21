@@ -329,6 +329,9 @@ Item {
     closeTimer.stop(); zoomAnim.stop(); zoomOutAnim.stop(); chromeOutAnim.stop(); closeFadeAnim.stop()
     flyTimer.stop(); flyEndTimer.stop()
     root.opened = false
+    // Clear the search while `closing` still disables the pill's fade: left for
+    // open() to clear, the empty pill faded out over the opening frames.
+    root.query = ""
     root.closing = false
     root.flyPhase = 0
     root.flying = false
