@@ -307,6 +307,7 @@ Item {
   function close() {
     if (!root.opened) return
     if (root.closing || !root.animate || root.flyPhase < 2) { root.finishClose(); return }
+    root.landingWindow = root.resolveLandingWindow()
     root.closing = true
     // The layer lets go of the keyboard now (keyboardFocus), and Hyprland hands
     // it back to the window focused before the overlay: focus the chosen one again
@@ -339,6 +340,7 @@ Item {
     root.chromeOpacity = 1
     root.closeOpacity = 1
     root.closeTarget = null
+    root.landingWindow = null
     if (root.pendingFocus) refocusTimer.restart()
   }
 
@@ -417,7 +419,8 @@ Item {
   property var windowOpacity: ({})
   property var noScreenShareQuery: []
   // One getprop batch for no_screen_share and the opacity props
-  // (Model.windowPropsBatch), asked even with redactNoScreenShare off.
+  // (Model.windowPropsBatch). With redactNoScreenShare off, only startup and
+  // open() ask (for the opacity), not window events.
   function queryNoScreenShare() {
     if (noShareProc.running) { noShareTimer.restart(); return }
     var addrs = Hyprland.toplevels.values.map(function(t) { return String(t.address) })
@@ -446,11 +449,17 @@ Item {
     if (!o) return 1
     var ipc = root.ipcOf(toplevel)
     if (ipc && ipc.fullscreen) return o.fullscreen
-    var t = root.closeTarget
-    var active = t && t.toplevel ? t.toplevel === toplevel
-      : t && t.workspace ? root.lastFocusedOn(t.workspace) === toplevel
-      : root.isActive(toplevel)
+    var active = root.landingWindow ? root.landingWindow === toplevel : root.isActive(toplevel)
     return active ? o.active : o.inactive
+  }
+  // The window that ends up active, resolved once per close (close() sets it
+  // before `closing`, which makes every thumb ask landingOpacity()).
+  property var landingWindow: null
+  function resolveLandingWindow() {
+    var t = root.closeTarget
+    if (t && t.toplevel) return t.toplevel
+    if (t && t.workspace) return root.lastFocusedOn(t.workspace)
+    return null
   }
   // The window Hyprland focuses when switching to `workspace`.
   function lastFocusedOn(workspace) {
@@ -1304,8 +1313,10 @@ Item {
         root.refocusCount += 1
         Quickshell.execDetached(root.pendingFocus)
       }
-      // Window rules (no_screen_share, opacity) can match on title.
-      if (/^(openwindow|closewindow|windowtitle(v2)?)$/.test(name)) noShareTimer.restart()
+      // Window rules can match on title. Only no_screen_share has to be current
+      // while closed; opacity is only read at open(), which queries anyway.
+      if (root.redactNoScreenShare && /^(openwindow|closewindow|windowtitle(v2)?)$/.test(name))
+        noShareTimer.restart()
     }
   }
 

@@ -122,6 +122,8 @@ var windowProps = ["no_screen_share", "opacity", "opacity_inactive", "opacity_fu
 var opacityOptions = ["decoration:active_opacity", "decoration:inactive_opacity",
                       "decoration:fullscreen_opacity"]
 
+var opacityKinds = ["active", "inactive", "fullscreen"]
+
 function windowPropsBatch(addrs) {
   var cmds = []
   for (var i = 0; i < addrs.length; i++)
@@ -166,10 +168,9 @@ function parseWindowProps(text, addrs) {
       else warnings.push("unexpected no_screen_share answer " + JSON.stringify(a[0]))
     }
     var o = {}
-    var names = ["active", "inactive", "fullscreen"]
     for (var j = 0; j < 3; j++) {
       var rule = unitOr1(answerValue(a[1 + j], windowProps[1 + j]))
-      o[names[j]] = answerValue(a[4 + j], windowProps[4 + j]) === true ? rule : rule * dec[j]
+      o[opacityKinds[j]] = answerValue(a[4 + j], windowProps[4 + j]) === true ? rule : rule * dec[j]
     }
     opacity[addrs[i]] = o
   }
