@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "git-spren.overview",
   "name": "Window overview",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "git-spren",
   "description": "Exposé-style overview: live thumbnails of every window, grouped by workspace",
   "license": "MIT",
