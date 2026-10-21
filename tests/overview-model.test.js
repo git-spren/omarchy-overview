@@ -142,6 +142,21 @@ test("parseWindowProps: opacity rules, decoration and overrides", () => {
   assert.deepEqual(junk.opacity.a, { active: 1, inactive: 1, fullscreen: 1 })
 })
 
+test("lastFocusedIndex: lowest focusHistoryID, first without any", () => {
+  assert.equal(M.lastFocusedIndex([{ focusHistoryID: 4 }, { focusHistoryID: 1 }, { focusHistoryID: 2 }]), 1)
+  assert.equal(M.lastFocusedIndex([undefined, { focusHistoryID: 3 }]), 1)
+  assert.equal(M.lastFocusedIndex([{}, undefined]), 0)
+  assert.equal(M.lastFocusedIndex([]), -1)
+})
+
+test("landingOpacity: active, inactive, fullscreen, unknown", () => {
+  const o = { active: 0.985, inactive: 0.86, fullscreen: 1 }
+  assert.equal(M.landingOpacity(o, false, true), 0.985)
+  assert.equal(M.landingOpacity(o, false, false), 0.86)
+  assert.equal(M.landingOpacity(o, true, false), 1)
+  assert.equal(M.landingOpacity(undefined, false, false), 1)
+})
+
 test("fuzzyScore: substring beats subsequence, word starts win", () => {
   assert.equal(M.fuzzyScore("xyz", "Firefox"), -1)
   assert.ok(M.fuzzyScore("fox", "Firefox") > M.fuzzyScore("ffx", "Firefox"))

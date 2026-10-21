@@ -165,6 +165,7 @@ Item {
   // close has put focus back on it (see onRawEvent).
   property string pendingFocusAddress: ""
   property int refocusCount: 0
+  property string lastActiveAddress: ""
   // "all" animation: Scale+Translate on the whole content, scrim fading in alongside.
   property real zoomScale: 1
   property real zoomTX: 0
@@ -274,7 +275,8 @@ Item {
     root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
-    root.queryNoScreenShare()
+    root.windowPropsFresh = false
+    root.queryWindowProps()
     root.refreshWallpaper()
     root.selectionTouched = false
     root.hoverArmed = false
@@ -289,14 +291,15 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { console.warn("overview: bad payload", payloadJson) }
     if (payload && typeof payload.query === "string")
       root.setQuery(payload.query.replace(/[\x00-\x1f\x7f]/g, ""))
-    root.flyPhase = root.animate ? 1 : 2
+    // Without animation the reveal still waits for the window properties.
+    root.flyPhase = root.animate || !root.windowPropsFresh ? 1 : 2
     // "all" fades the backdrop in with the zoom; without this the capture wait
     // (phase 1, up to 300 ms) shows it at full strength over the live desktop.
     root.zoomScrim = root.animateAll ? 0 : 1
     root.flyWaited = 0
-    flyTimer.interval = 45   // a close during the capture wait leaves it at 30
+    flyTimer.interval = root.animate ? 45 : 15   // a close during the capture wait leaves it at 30
     root.opened = true
-    if (root.animate) flyTimer.restart()
+    if (root.flyPhase === 1) flyTimer.restart()
     // IPC data (window positions) arrives a moment later; re-sort once it does.
     settleTimer.restart()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -417,27 +420,32 @@ Item {
   // address (no 0x) -> { active, inactive, fullscreen }: the opacity Hyprland
   // draws the window with (rules × decoration options), for landingOpacity().
   property var windowOpacity: ({})
-  property var noScreenShareQuery: []
+  property var windowPropsQuery: []
+  // False from open() until that open's answer is in: the reveal (phase 2)
+  // waits for it, since answers kept from before can be stale (rules can match
+  // on title, and title changes are not followed while closed).
+  property bool windowPropsFresh: true
   // One getprop batch for no_screen_share and the opacity props
-  // (Model.windowPropsBatch). With redactNoScreenShare off, only startup and
-  // open() ask (for the opacity), not window events.
-  function queryNoScreenShare() {
-    if (noShareProc.running) { noShareTimer.restart(); return }
+  // (Model.windowPropsBatch): at startup, on open() and, while open, after
+  // window events. Nothing while closed, so an idle desktop costs nothing.
+  function queryWindowProps() {
+    if (windowPropsProc.running) { windowPropsTimer.restart(); return }
     var addrs = Hyprland.toplevels.values.map(function(t) { return String(t.address) })
       .filter(function(a) { return /^[0-9a-f]+$/i.test(a) })
-    if (addrs.length === 0) { root.noScreenShare = ({}); root.windowOpacity = ({}); return }
-    root.noScreenShareQuery = addrs
-    noShareProc.command = ["hyprctl", "-j", "--batch", Model.windowPropsBatch(addrs)]
-    noShareProc.running = true
+    if (addrs.length === 0) { root.noScreenShare = ({}); root.windowOpacity = ({}); root.windowPropsFresh = true; return }
+    root.windowPropsQuery = addrs
+    windowPropsProc.command = ["hyprctl", "-j", "--batch", Model.windowPropsBatch(addrs)]
+    windowPropsProc.running = true
   }
   // no_screen_share fails closed (OverviewModel.js): windows without a clear
   // answer stay unknown, and unknown windows stay uncaptured (privacyPending).
   // Opacity fails open (1).
-  function applyNoScreenShare(text) {
-    var r = Model.parseWindowProps(text, root.noScreenShareQuery)
+  function applyWindowProps(text) {
+    var r = Model.parseWindowProps(text, root.windowPropsQuery)
     r.warnings.forEach(function(w) { console.warn("git-spren.overview: " + w) })
     root.noScreenShare = r.map
     root.windowOpacity = r.opacity
+    root.windowPropsFresh = true
   }
 
   // The opacity `toplevel` has once the overlay is gone: the window being
@@ -445,12 +453,10 @@ Item {
   // inactive. Thumbnails fade to it on close and from it on open, so nothing
   // snaps when the real windows show again.
   function landingOpacity(toplevel) {
-    var o = toplevel ? root.windowOpacity[toplevel.address] : null
-    if (!o) return 1
+    if (!toplevel) return 1
     var ipc = root.ipcOf(toplevel)
-    if (ipc && ipc.fullscreen) return o.fullscreen
     var active = root.landingWindow ? root.landingWindow === toplevel : root.isActive(toplevel)
-    return active ? o.active : o.inactive
+    return Model.landingOpacity(root.windowOpacity[toplevel.address], !!(ipc && ipc.fullscreen), active)
   }
   // The window that ends up active, resolved once per close (close() sets it
   // before `closing`, which makes every thumb ask landingOpacity()).
@@ -463,14 +469,9 @@ Item {
   }
   // The window Hyprland focuses when switching to `workspace`.
   function lastFocusedOn(workspace) {
-    var best = null, bestId = Infinity
     var list = workspace && workspace.toplevels ? workspace.toplevels.values : []
-    for (var i = 0; i < list.length; i++) {
-      var ipc = root.ipcOf(list[i])
-      var id = ipc && ipc.focusHistoryID !== undefined ? ipc.focusHistoryID : Infinity
-      if (!best || id < bestId) { best = list[i]; bestId = id }
-    }
-    return best
+    var i = Model.lastFocusedIndex(list.map(function(t) { return root.ipcOf(t) }))
+    return i >= 0 ? list[i] : null
   }
 
   // Caption for a redacted window: the app's name, never its title.
@@ -1254,12 +1255,15 @@ Item {
   Timer {
     id: flyTimer; interval: 45
     onTriggered: if (root.opened) {
-      if (root.animateAll && root.flyWaited < 300 && !root.homeThumbsReady()) {
+      var waiting = !root.windowPropsFresh || (root.animateAll && !root.homeThumbsReady())
+      if (waiting && root.flyWaited < 300) {
         root.flyWaited += 30
         flyTimer.interval = 30
         flyTimer.restart()
         return
       }
+      // No answer in time: fail closed, every window uncaptured until it lands.
+      if (!root.windowPropsFresh) root.noScreenShare = ({})
       flyTimer.interval = 45
       root.flying = root.animateCurrent
       root.flyPhase = 2
@@ -1316,7 +1320,12 @@ Item {
     target: Hyprland
     function onRawEvent(event) {
       var name = String(event.name)
-      if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|activewindow(v2)?|changefloatingmode|fullscreen)$/.test(name))
+      // activewindowv2 also fires on every title change of the active window (a
+      // spinner in a terminal title: once a second): only a new address counts.
+      if (name === "activewindowv2") {
+        var addr = String(event.data)
+        if (addr !== root.lastActiveAddress) { root.lastActiveAddress = addr; root.scheduleRebuild() }
+      } else if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|changefloatingmode|fullscreen)$/.test(name))
         root.scheduleRebuild()
       // The close released the keyboard and Hyprland moved focus back to the
       // window from before the overlay (which can switch workspace): put it on
@@ -1327,32 +1336,32 @@ Item {
         root.refocusCount += 1
         Quickshell.execDetached(root.pendingFocus)
       }
-      // Window rules can match on title. Only no_screen_share has to be current
-      // while closed; opacity is only read at open(), which queries anyway.
-      if (root.redactNoScreenShare && /^(openwindow|closewindow|windowtitle(v2)?)$/.test(name))
-        noShareTimer.restart()
+      // Window rules can match on title. While closed nothing is shown, and
+      // open() asks again before the reveal.
+      if (root.opened && /^(openwindow|closewindow|windowtitle(v2)?)$/.test(name))
+        windowPropsTimer.restart()
     }
   }
 
-  Timer { id: noShareTimer; interval: 150; onTriggered: root.queryNoScreenShare() }
+  Timer { id: windowPropsTimer; interval: 150; onTriggered: root.queryWindowProps() }
   // After a tag dispatch: refresh the IPC data, then rebuild once it has landed
   // (hidden windows drop out of the model; redaction follows lastIpcObject).
   Timer { id: tagTimer; interval: 80; onTriggered: { Hyprland.refreshToplevels(); tagSettleTimer.restart() } }
   Timer { id: tagSettleTimer; interval: 150; onTriggered: if (root.opened && !root.closing) root.rebuild() }
   Process {
-    id: noShareProc
-    stdout: StdioCollector { onStreamFinished: root.applyNoScreenShare(text) }
+    id: windowPropsProc
+    stdout: StdioCollector { onStreamFinished: root.applyWindowProps(text) }
   }
   // Fetch IPC data (focus history, positions, tags) up front, so `list` and
   // `jump` are right even before the first window event or open.
-  Component.onCompleted: { noShareTimer.restart(); refreshTimer.restart(); root.refreshWallpaper() }
+  Component.onCompleted: { windowPropsTimer.restart(); refreshTimer.restart(); root.refreshWallpaper() }
 
   Process {
     id: wallpaperProc
     command: ["readlink", "-f", root.wallpaperLink]
     stdout: StdioCollector { onStreamFinished: root.wallpaperPath = String(text || "").trim() }
   }
-  onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryNoScreenShare()
+  onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryWindowProps()
 
   PanelWindow {
     id: panel

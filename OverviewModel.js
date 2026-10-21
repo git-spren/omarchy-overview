@@ -177,6 +177,27 @@ function parseWindowProps(text, addrs) {
   return { map: map, opacity: opacity, warnings: warnings }
 }
 
+// Index of the window Hyprland focuses when switching to a workspace: the
+// lowest focusHistoryID among `ipcs` (lastIpcObject of each window, possibly
+// undefined); 0 when none has one, -1 for no windows.
+function lastFocusedIndex(ipcs) {
+  var best = -1, bestId = Infinity
+  for (var i = 0; i < ipcs.length; i++) {
+    var ipc = ipcs[i]
+    var id = ipc && typeof ipc.focusHistoryID === "number" ? ipc.focusHistoryID : Infinity
+    if (best < 0 || id < bestId) { best = i; bestId = id }
+  }
+  return best
+}
+
+// The opacity a window has once the overlay is gone, from its
+// parseWindowProps() entry (none: 1, opaque).
+function landingOpacity(opacity, fullscreen, active) {
+  if (!opacity) return 1
+  if (fullscreen) return opacity.fullscreen
+  return active ? opacity.active : opacity.inactive
+}
+
 function wordStart(h, i) { return i === 0 || /[^a-z0-9]/.test(h.charAt(i - 1)) }
 
 // Score of `needle` (lower case) in `hay`, or -1. Substrings beat scattered
@@ -266,6 +287,8 @@ if (typeof module !== "undefined") {
     windowProps: windowProps,
     windowPropsBatch: windowPropsBatch,
     parseWindowProps: parseWindowProps,
+    lastFocusedIndex: lastFocusedIndex,
+    landingOpacity: landingOpacity,
     fuzzyScore: fuzzyScore,
     matchScore: matchScore,
     pickSpatial: pickSpatial,
