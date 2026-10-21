@@ -133,10 +133,12 @@ their addresses).
 
 ## Install
 
-Requires Omarchy 4 (tested on 4.0.4 with Hyprland 0.56.2 and Quickshell 0.3.1).
+Requires Omarchy 4 (tested on 4.0.4 with Hyprland 0.56.2 and Quickshell 0.3.1). It needs
+nothing beyond what Omarchy already ships: it runs `hyprctl` (Hyprland) and `readlink`
+(coreutils) and uses Quickshell's Hyprland and Wayland modules.
 
 ```sh
-omarchy plugin add <path-or-url-of-this-repo> --enable --yes
+omarchy plugin add https://github.com/git-spren/omarchy-overview --enable --yes
 ```
 
 From a checkout, `bin/install` does the same with the current committed `HEAD`.
@@ -147,12 +149,28 @@ Then bind a key in `~/.config/hypr/bindings.lua`:
 o.bind("SUPER + F3", "Window overview", "omarchy-shell shell toggle git-spren.overview")
 ```
 
-and turn off Hyprland's own layer animation for the overlay in
-`~/.config/hypr/looknfeel.lua`, so it doesn't fight the plugin's animation:
+Optional: Omarchy fades every overlay in by default. To make the overview appear
+instantly, like Omarchy's own menus, add this to `~/.config/hypr/looknfeel.lua`:
 
 ```lua
 hl.layer_rule({ match = { namespace = "git-spren-overview" }, no_anim = true, animation = "none" })
 ```
+
+Installing changes nothing else: the plugin only writes its own entry in
+`~/.config/omarchy/shell.json`, and only when you run `set` or `reset`.
+
+## Remove
+
+```sh
+omarchy plugin remove git-spren.overview --yes
+```
+
+This disables the plugin, which drops its entry in `~/.config/omarchy/shell.json` and the
+settings on it, and deletes its folder under `~/.config/omarchy/plugins/`
+(`omarchy plugin disable git-spren.overview` does only the first part). Then delete the
+`SUPER + F3` binding and the `layer_rule` line you added to `~/.config/hypr/`. Windows you
+tagged `overview-hide` or `overview-redact` keep the tag until they close, or until you run
+`clear` before removing the plugin.
 
 ## Settings
 
