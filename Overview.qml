@@ -412,25 +412,56 @@ Item {
 
   // address (no 0x) -> bool, refreshed while closed on window events.
   property var noScreenShare: ({})
+  // address (no 0x) -> { active, inactive, fullscreen }: the opacity Hyprland
+  // draws the window with (rules × decoration options), for landingOpacity().
+  property var windowOpacity: ({})
   property var noScreenShareQuery: []
+  // One getprop batch for no_screen_share and the opacity props
+  // (Model.windowPropsBatch), asked even with redactNoScreenShare off.
   function queryNoScreenShare() {
-    if (!root.redactNoScreenShare) return
     if (noShareProc.running) { noShareTimer.restart(); return }
     var addrs = Hyprland.toplevels.values.map(function(t) { return String(t.address) })
       .filter(function(a) { return /^[0-9a-f]+$/i.test(a) })
-    if (addrs.length === 0) { root.noScreenShare = ({}); return }
+    if (addrs.length === 0) { root.noScreenShare = ({}); root.windowOpacity = ({}); return }
     root.noScreenShareQuery = addrs
-    noShareProc.command = ["hyprctl", "-j", "--batch", addrs.map(function(a) {
-      return "getprop address:0x" + a + " no_screen_share"
-    }).join("; ")]
+    noShareProc.command = ["hyprctl", "-j", "--batch", Model.windowPropsBatch(addrs)]
     noShareProc.running = true
   }
-  // Fails closed (OverviewModel.js): windows without a clear answer stay
-  // unknown, and unknown windows stay uncaptured (privacyPending).
+  // no_screen_share fails closed (OverviewModel.js): windows without a clear
+  // answer stay unknown, and unknown windows stay uncaptured (privacyPending).
+  // Opacity fails open (1).
   function applyNoScreenShare(text) {
-    var r = Model.parseNoScreenShare(text, root.noScreenShareQuery)
+    var r = Model.parseWindowProps(text, root.noScreenShareQuery)
     r.warnings.forEach(function(w) { console.warn("git-spren.overview: " + w) })
     root.noScreenShare = r.map
+    root.windowOpacity = r.opacity
+  }
+
+  // The opacity `toplevel` has once the overlay is gone: the window being
+  // landed on (closeTarget, else the one active before) is active, the rest
+  // inactive. Thumbnails fade to it on close and from it on open, so nothing
+  // snaps when the real windows show again.
+  function landingOpacity(toplevel) {
+    var o = toplevel ? root.windowOpacity[toplevel.address] : null
+    if (!o) return 1
+    var ipc = root.ipcOf(toplevel)
+    if (ipc && ipc.fullscreen) return o.fullscreen
+    var t = root.closeTarget
+    var active = t && t.toplevel ? t.toplevel === toplevel
+      : t && t.workspace ? root.lastFocusedOn(t.workspace) === toplevel
+      : root.isActive(toplevel)
+    return active ? o.active : o.inactive
+  }
+  // The window Hyprland focuses when switching to `workspace`.
+  function lastFocusedOn(workspace) {
+    var best = null, bestId = Infinity
+    var list = workspace && workspace.toplevels ? workspace.toplevels.values : []
+    for (var i = 0; i < list.length; i++) {
+      var ipc = root.ipcOf(list[i])
+      var id = ipc && ipc.focusHistoryID !== undefined ? ipc.focusHistoryID : Infinity
+      if (!best || id < bestId) { best = list[i]; bestId = id }
+    }
+    return best
   }
 
   // Caption for a redacted window: the app's name, never its title.
@@ -1110,6 +1141,7 @@ Item {
         windows: c.toplevels.map(function(t) {
           return { title: t.title, address: t.address, active: root.isActive(t),
                    redacted: root.isRedacted(t),
+                   landingOpacity: root.landingOpacity(t),
                    matched: root.matches(t, root.query),
                    fly: root.flySource(t),
                    appId: t.wayland ? t.wayland.appId : null }
@@ -1272,7 +1304,7 @@ Item {
         root.refocusCount += 1
         Quickshell.execDetached(root.pendingFocus)
       }
-      // Window rules (and so no_screen_share) can match on title.
+      // Window rules (no_screen_share, opacity) can match on title.
       if (/^(openwindow|closewindow|windowtitle(v2)?)$/.test(name)) noShareTimer.restart()
     }
   }

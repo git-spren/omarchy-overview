@@ -1,5 +1,5 @@
 // Stateless logic of the overview: settings parsing, search scoring, Lua
-// quoting, privacy-tag and no_screen_share parsing, spatial navigation and the
+// quoting, privacy-tag and window-property parsing, spatial navigation and the
 // grid column choice. Plain data in, plain data out, so tests/ can run it under
 // node; Overview.qml wraps these with the Hyprland / Quickshell objects.
 
@@ -114,28 +114,66 @@ function hasTag(tags, tag) {
   return false
 }
 
-// Answers of one `hyprctl -j --batch "getprop address:0x… no_screen_share; …"`
-// for `addrs`, as { map: address -> bool, warnings: [...] }. Fails closed:
-// answers are matched to windows by position, so a count mismatch (hyprctl
-// failed, output changed) leaves every window unknown, and an answer that is
-// neither a boolean nor "window not found" leaves that one unknown.
-function parseNoScreenShare(text, addrs) {
+// Window properties asked per window with one `hyprctl -j --batch`: they are
+// not in the clients JSON. Each window gets these getprops in this order, then
+// the decoration options follow once.
+var windowProps = ["no_screen_share", "opacity", "opacity_inactive", "opacity_fullscreen",
+                   "opacity_override", "opacity_inactive_override", "opacity_fullscreen_override"]
+var opacityOptions = ["decoration:active_opacity", "decoration:inactive_opacity",
+                      "decoration:fullscreen_opacity"]
+
+function windowPropsBatch(addrs) {
+  var cmds = []
+  for (var i = 0; i < addrs.length; i++)
+    for (var j = 0; j < windowProps.length; j++)
+      cmds.push("getprop address:0x" + addrs[i] + " " + windowProps[j])
+  for (var k = 0; k < opacityOptions.length; k++) cmds.push("getoption " + opacityOptions[k])
+  return cmds.join("; ")
+}
+
+function answerValue(part, key) {
+  try { return JSON.parse(part)[key] } catch (e) { return undefined }
+}
+
+function unitOr1(v) { return typeof v === "number" && v >= 0 && v <= 1 ? v : 1 }
+
+// Answers of windowPropsBatch(addrs) as { map: address -> no_screen_share bool,
+// opacity: address -> { active, inactive, fullscreen }, warnings: [...] }.
+// Answers are matched by position, so a count mismatch (hyprctl failed, output
+// changed) leaves every window unknown. no_screen_share fails closed: an answer
+// that is neither a boolean nor "window not found" leaves that window unknown.
+// Opacity fails open: anything odd counts as 1, i.e. opaque, as without rules.
+// A rule value is multiplied by the decoration option unless its override is set.
+function parseWindowProps(text, addrs) {
   var parts = String(text || "").split(/\n\s*\n/).map(function(p) { return p.trim() })
     .filter(function(p) { return p !== "" })
-  var map = {}, warnings = []
-  if (parts.length !== addrs.length) {
-    warnings.push("no_screen_share query gave " + parts.length + " answers for "
+  var map = {}, opacity = {}, warnings = []
+  var n = windowProps.length, expected = addrs.length * n + opacityOptions.length
+  if (addrs.length === 0) return { map: map, opacity: opacity, warnings: warnings }
+  if (parts.length !== expected) {
+    warnings.push("window property query gave " + parts.length + " answers for "
                   + addrs.length + " windows; not capturing them")
-    return { map: map, warnings: warnings }
+    return { map: map, opacity: opacity, warnings: warnings }
   }
+  var base = addrs.length * n
+  var dec = opacityOptions.map(function(o, k) { return unitOr1(answerValue(parts[base + k], "float")) })
   for (var i = 0; i < addrs.length; i++) {
-    if (parts[i] === "window not found") { map[addrs[i]] = false; continue }
-    var v
-    try { v = JSON.parse(parts[i]).no_screen_share } catch (e) {}
-    if (v === true || v === false) map[addrs[i]] = v
-    else warnings.push("unexpected no_screen_share answer " + JSON.stringify(parts[i]))
+    var a = parts.slice(i * n, i * n + n)
+    if (a[0] === "window not found") map[addrs[i]] = false
+    else {
+      var v = answerValue(a[0], "no_screen_share")
+      if (v === true || v === false) map[addrs[i]] = v
+      else warnings.push("unexpected no_screen_share answer " + JSON.stringify(a[0]))
+    }
+    var o = {}
+    var names = ["active", "inactive", "fullscreen"]
+    for (var j = 0; j < 3; j++) {
+      var rule = unitOr1(answerValue(a[1 + j], windowProps[1 + j]))
+      o[names[j]] = answerValue(a[4 + j], windowProps[4 + j]) === true ? rule : rule * dec[j]
+    }
+    opacity[addrs[i]] = o
   }
-  return { map: map, warnings: warnings }
+  return { map: map, opacity: opacity, warnings: warnings }
 }
 
 function wordStart(h, i) { return i === 0 || /[^a-z0-9]/.test(h.charAt(i - 1)) }
@@ -224,7 +262,9 @@ if (typeof module !== "undefined") {
     parseSetArgument: parseSetArgument,
     luaString: luaString,
     hasTag: hasTag,
-    parseNoScreenShare: parseNoScreenShare,
+    windowProps: windowProps,
+    windowPropsBatch: windowPropsBatch,
+    parseWindowProps: parseWindowProps,
     fuzzyScore: fuzzyScore,
     matchScore: matchScore,
     pickSpatial: pickSpatial,

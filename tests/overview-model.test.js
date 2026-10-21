@@ -92,16 +92,54 @@ test("hasTag strips the dynamic-tag star", () => {
   assert.equal(M.hasTag("overview-hide", "overview-hide"), false)
 })
 
-test("parseNoScreenShare: answers in order, fails closed", () => {
-  const ok = M.parseNoScreenShare('{"no_screen_share": true}\n\nwindow not found\n\n{"no_screen_share": false}\n', ["a", "b", "c"])
-  assert.deepEqual(ok, { map: { a: true, b: false, c: false }, warnings: [] })
-  const short = M.parseNoScreenShare('{"no_screen_share": true}', ["a", "b"])
+// One window's seven getprop answers, in windowProps order.
+function propAnswers(nss, o, oi, of, ovr) {
+  const v = [nss, o, oi, of, ovr ? ovr[0] : false, ovr ? ovr[1] : false, ovr ? ovr[2] : false]
+  return M.windowProps.map((p, i) => JSON.stringify({ [p]: v[i] }))
+}
+function decAnswers(a, i, f) {
+  return [a, i, f].map(v => JSON.stringify({ option: "x", float: v, set: false }))
+}
+const joinAnswers = parts => parts.join("\n\n\n") + "\n"
+
+test("windowPropsBatch: every prop per window, then the options", () => {
+  const b = M.windowPropsBatch(["a1", "b2"]).split("; ")
+  assert.equal(b.length, 2 * M.windowProps.length + 3)
+  assert.equal(b[0], "getprop address:0xa1 no_screen_share")
+  assert.equal(b[M.windowProps.length], "getprop address:0xb2 no_screen_share")
+  assert.equal(b[b.length - 1], "getoption decoration:fullscreen_opacity")
+})
+
+test("parseWindowProps: no_screen_share in order, fails closed", () => {
+  const nf = Array(M.windowProps.length).fill("window not found")
+  const ok = M.parseWindowProps(joinAnswers([...propAnswers(true, 1, 1, 1), ...nf,
+    ...propAnswers(false, 1, 1, 1), ...decAnswers(1, 1, 1)]), ["a", "b", "c"])
+  assert.deepEqual(ok.map, { a: true, b: false, c: false })
+  assert.deepEqual(ok.warnings, [])
+  const short = M.parseWindowProps('{"no_screen_share": true}', ["a", "b"])
   assert.deepEqual(short.map, {})
+  assert.deepEqual(short.opacity, {})
   assert.equal(short.warnings.length, 1)
-  const odd = M.parseNoScreenShare('{"no_screen_share": 1}\n\n{"no_screen_share": true}', ["a", "b"])
+  const odd = M.parseWindowProps(joinAnswers([...propAnswers(1, 1, 1, 1),
+    ...propAnswers(true, 1, 1, 1), ...decAnswers(1, 1, 1)]), ["a", "b"])
   assert.deepEqual(odd.map, { b: true })
   assert.equal(odd.warnings.length, 1)
-  assert.deepEqual(M.parseNoScreenShare("", []), { map: {}, warnings: [] })
+  assert.deepEqual(M.parseWindowProps("", []), { map: {}, opacity: {}, warnings: [] })
+})
+
+test("parseWindowProps: opacity rules, decoration and overrides", () => {
+  const r = M.parseWindowProps(joinAnswers([
+    ...propAnswers(false, 0.985, 0.86, 1),
+    ...propAnswers(false, 0.5, 0.5, 0.5, [true, false, true]),
+    ...Array(M.windowProps.length).fill("window not found"),
+    ...decAnswers(1, 0.9, 0.8)]), ["a", "b", "c"])
+  assert.deepEqual(r.opacity.a, { active: 0.985, inactive: 0.86 * 0.9, fullscreen: 0.8 })
+  assert.deepEqual(r.opacity.b, { active: 0.5, inactive: 0.5 * 0.9, fullscreen: 0.5 })
+  // Unknown answers count as opaque rules, still under the decoration options.
+  assert.deepEqual(r.opacity.c, { active: 1, inactive: 0.9, fullscreen: 0.8 })
+  const junk = M.parseWindowProps(joinAnswers([...propAnswers(false, 7, "x", -1),
+    "prop not found", "prop not found", "prop not found"]), ["a"])
+  assert.deepEqual(junk.opacity.a, { active: 1, inactive: 1, fullscreen: 1 })
 })
 
 test("fuzzyScore: substring beats subsequence, word starts win", () => {

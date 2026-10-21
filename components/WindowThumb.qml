@@ -73,13 +73,56 @@ Item {
   property real backSY: 1
   readonly property int phase: overview ? overview.flyPhase : 2
   opacity: 1
+  // Window content only (capture, redacted box, icon): eases from the real
+  // window's Hyprland opacity to opaque on open and back to it on close
+  // (overview.landingOpacity), so translucent windows do not snap.
+  property real contentOpacity: 1
+  // The frame's solid fill fades in alongside on open: until the content is
+  // opaque, the wallpaper (not the fill) must show through it, as it does
+  // through the real window.
+  property real fillOpacity: 1
 
   function stopAnimations() { flyAnim.stop(); fadeAnim.stop(); flyBackAnim.stop(); fadeOutAnim.stop() }
 
   onPhaseChanged: {
+    if (thumb.phase <= 1) {
+      contentAnim.stop(); fillAnim.stop()
+      thumb.contentOpacity = 1
+      thumb.fillOpacity = thumb.phase === 1 ? 0 : 1
+    }
     if (thumb.phase === 1) { thumb.stopAnimations(); thumb.opacity = 0; return }
-    if (thumb.phase === 2) thumb.startFly()
+    if (thumb.phase === 2) {
+      thumb.startFly()
+      if (overview && overview.animate) {
+        thumb.fadeContent(overview.landingOpacity(thumb.toplevel), 1)
+        fillAnim.start()
+      } else {
+        thumb.fillOpacity = 1
+      }
+    }
     if (thumb.phase === 3) thumb.startFlyBack()
+  }
+
+  onClosingChanged: if (thumb.closing) thumb.fadeContent(thumb.contentOpacity, overview.landingOpacity(thumb.toplevel))
+
+  function fadeContent(from, to) {
+    contentAnim.stop()
+    thumb.contentOpacity = from
+    if (from === to) return
+    contentAnim.to = to
+    contentAnim.start()
+  }
+
+  NumberAnimation {
+    id: fillAnim
+    target: thumb; property: "fillOpacity"; from: 0; to: 1
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
+  }
+
+  NumberAnimation {
+    id: contentAnim
+    target: thumb; property: "contentOpacity"
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
   }
 
   // Registered with the overview so spatial (grid) navigation can compare
@@ -179,7 +222,8 @@ Item {
     radius: overview.cornerRadius
     // While closing, the frame fill drops at once (the border stays) so the windows
     // land on the desktop as their own content (the frame size is unchanged).
-    color: thumb.closing ? "transparent" : overview.surface
+    color: thumb.closing ? "transparent"
+      : Qt.rgba(overview.surface.r, overview.surface.g, overview.surface.b, overview.surface.a * thumb.fillOpacity)
     // Selected: zoomed, raised above its neighbours, theme accent border.
     // Active (the window you came from) keeps a dimmer accent so it stays findable.
     // Plain windows get a faint light-grey edge (subtleBorderColor).
@@ -211,6 +255,7 @@ Item {
       live: thumb.refreshing && overview.refreshLive
       paintCursor: false
       visible: hasContent && !thumb.redacted
+      opacity: thumb.contentOpacity
     }
 
     Connections {
@@ -227,11 +272,13 @@ Item {
       visible: thumb.redacted
       radius: Math.max(0, parent.radius - thumb.borderWidth)
       color: "black"
+      opacity: thumb.contentOpacity
     }
 
     Image {
       anchors.centerIn: parent
       visible: !view.hasContent || thumb.redacted
+      opacity: thumb.contentOpacity
       width: Math.min(Style.space(64), thumb.fitH * 0.5)
       height: width
       sourceSize: Qt.size(width, height)
