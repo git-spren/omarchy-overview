@@ -780,8 +780,22 @@ Item {
     var name = String(workspace.name)
     var target = workspace.id > 0 ? String(workspace.id)
       : name.indexOf("special:") === 0 ? name : "name:" + name
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + Model.luaString(target) + " })"])
+    var last = root.lastFocusedOn(workspace)
+    root.dispatchWorkspaceFocus(target, last ? String(last.address) : "")
     if (dismissAfter !== false) root.closeToward({ workspace: workspace, toplevel: null })
+  }
+
+  // Like activate(): while our layer holds the keyboard the switch only sticks
+  // until the layer lets go, then Hyprland focuses the window from before the
+  // overlay again and switches back to its workspace. So the command is kept
+  // as pendingFocus and re-run while closing (whenever another window than
+  // `address`, the one the workspace focuses, turns active) and after close.
+  function dispatchWorkspaceFocus(target, address) {
+    var cmd = ["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + Model.luaString(target) + " })"]
+    Quickshell.execDetached(cmd)
+    root.pendingFocus = cmd
+    root.pendingFocusAddress = address.replace(/^0x/, "")
+    root.refocusCount = 0
   }
 
   // False when there is no such workspace and it cannot be created: only
@@ -791,7 +805,7 @@ Item {
     for (var i = 0; i < all.length; i++)
       if (all[i].id === id) { root.focusWorkspace(all[i]); return true }
     if (!(id > 0)) return false
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + Model.luaString(String(id)) + " })"])
+    root.dispatchWorkspaceFocus(String(id), "")
     root.dismissNow()
     return true
   }
