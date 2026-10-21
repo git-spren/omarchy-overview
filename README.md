@@ -7,11 +7,11 @@ keyboard and you land on it, workspace switch included.
 
 It ships as an Omarchy shell plugin (`git-spren.overview`, kind `overlay`) for Quickshell.
 
-<img width="1280" height="720" alt="omarchy-overview demo: open the overview, type to search, pick a window" src="https://github.com/user-attachments/assets/bb915c4d-1cae-4871-a69d-59cb07a05501" />
+<img width="1280" height="720" alt="omarchy-overview demo: open the overview, type to search, pick a window" src="https://github.com/user-attachments/assets/0b2ffaf2-5730-4ce2-a6ff-2483a7d661e1" />
 
 Full-quality video (1080p):
 
-https://github.com/user-attachments/assets/b5ee171b-79b2-42e0-9ff4-581aabdb3880
+https://github.com/user-attachments/assets/f39c104f-9b83-4d30-a0dc-8fead5ab9c25
 
 ## Features
 
