@@ -202,7 +202,7 @@ Disabling the plugin removes its entry, and its settings with it.
 | `layout` | `"grid"`, `"columns"`, `"rows"` | `"grid"` |
 | `zoom` | selected-thumbnail zoom in columns/rows: `"small"`, `"medium"`, `"large"` or a number 1.0–2.0 | `"medium"` |
 | `selectedBorder` | `"accent"`, `"selected"`, `"foreground"`, `"urgent"` or `"#rrggbb"` | `"accent"` |
-| `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"` | `"all"` |
+| `animate` | `"all"` (zoom the whole overview), `"current"` (fly the current workspace's windows), `"none"`; Omarchy's no-animations mode (`omarchy toggle animations`) always means `"none"` | `"all"` |
 | `animationDuration` | milliseconds, 60–1000 | `350` |
 | `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `80` / `95` |
 | `backdrop` | `"wallpaper"` (the desktop background, lightly dimmed) or `"dim"` (a dark scrim over the desktop) | `"wallpaper"` |

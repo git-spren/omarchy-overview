@@ -37,7 +37,7 @@ Item {
   // Search: windows that do not match the typed query are dimmed.
   readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
   property real dim: matched ? 0 : 1
-  Behavior on dim { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+  Behavior on dim { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
 
   readonly property real borderWidth: Math.max(1, Style.space(1))
   readonly property real selectedBorderWidth: Math.max(2, Style.space(2))
@@ -232,7 +232,7 @@ Item {
       : thumb.urgent ? overview.urgent
       : thumb.active ? Util.alpha(thumb.selectedColor, 0.55)
       : overview.subtleBorderColor
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    Behavior on border.color { ColorAnimation { duration: Style.duration(120) } }
     // No zoom in the exact (grid) mode: the box clips it and the border + overlay
     // caption already mark the selection.
     scale: thumb.selected && !thumb.exact ? thumb.selectedZoom : 1
@@ -241,7 +241,7 @@ Item {
       Scale { origin.x: 0; origin.y: 0; xScale: thumb.flySX; yScale: thumb.flySY },
       Translate { x: thumb.flyDX; y: thumb.flyDY }
     ]
-    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
 
     ScreencopyView {
       id: view

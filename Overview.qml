@@ -119,7 +119,9 @@ Item {
   readonly property string layoutMode: root.setting("layout")
   readonly property bool layoutRows: root.layoutMode === "rows"
   readonly property bool layoutGrid: root.layoutMode === "grid"
-  readonly property string animateMode: root.setting("animate")
+  // Omarchy's no-animations mode (`omarchy toggle animations`, Style.reduceMotion)
+  // wins over the setting: the overlay then opens and closes at once.
+  readonly property string animateMode: Style.reduceMotion ? "none" : root.setting("animate")
   readonly property bool animate: root.animateMode !== "none"
   readonly property bool animateCurrent: root.animateMode === "current"
   readonly property bool animateAll: root.animateMode === "all"
@@ -132,10 +134,38 @@ Item {
   property int captureTick: 0
   readonly property bool redactNoScreenShare: root.setting("redactNoScreenShare")
   readonly property bool backdropWallpaper: root.setting("backdrop") === "wallpaper"
-  // Omarchy's current background (the link omarchy-theme-bg-set points); resolved
-  // so the Image shares the pixmap cache with the shell's own background layer.
+  // Omarchy's current background (the link omarchy-theme-bg-set points), resolved
+  // with readlink so a new background shows on the next open.
   readonly property string wallpaperLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
   property string wallpaperPath: ""
+  // Header size of wallpaperPath ({ width, height }; 0x0 = unreadable), null until probed.
+  property var wallpaperNative: null
+  // Decoded at the screen's pixel size, like the shell's background layer: at the
+  // file's native size a 10k image costs a few hundred MB. Qt decodes up to cover
+  // sourceSize, so a smaller image keeps its own size. The screen is known before
+  // the first open, so the image is ready by then; 0x0 (no source) until probed.
+  readonly property var wallpaperScreen: root.targetScreen || root.screenForFocusedMonitor()
+  readonly property size wallpaperDecodeSize: {
+    var scr = root.wallpaperScreen, nat = root.wallpaperNative
+    if (!scr || !nat) return Qt.size(0, 0)
+    var w = Math.ceil(scr.width * scr.devicePixelRatio), h = Math.ceil(scr.height * scr.devicePixelRatio)
+    if (nat.width > 0 && nat.height > 0 && (nat.width < w || nat.height < h)) return Qt.size(nat.width, nat.height)
+    return Qt.size(w, h)
+  }
+  function setWallpaperPath(path) {
+    if (path === root.wallpaperPath && root.wallpaperNative) return
+    root.wallpaperPath = path
+    root.wallpaperNative = null
+    // Videos (OWE backgrounds) do not load in an Image; the scrim stands in.
+    if (!path || Util.isVideoPath(path)) return
+    root.probeWallpaperSize()
+  }
+  function probeWallpaperSize() {
+    if (wallpaperSizeProc.running || !root.wallpaperPath) return
+    wallpaperSizeProc.path = root.wallpaperPath
+    wallpaperSizeProc.command = ["magick", "identify", "-ping", "-format", "%w %h", root.wallpaperPath + "[0]"]
+    wallpaperSizeProc.running = true
+  }
   function refreshWallpaper() { if (!wallpaperProc.running) wallpaperProc.running = true }
   readonly property real closeFadeEndPct: root.setting("closeFadeEnd")
   readonly property real closeFadeStartPct: Math.min(root.setting("closeFadeStart"), root.closeFadeEndPct)
@@ -1182,6 +1212,7 @@ Item {
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
                             refreshRate: root.refreshRate, redactNoScreenShare: root.redactNoScreenShare,
                             backdrop: root.setting("backdrop"), wallpaper: root.wallpaperPath,
+                            reduceMotion: Style.reduceMotion,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
 
@@ -1196,7 +1227,7 @@ Item {
       var v = root.setting(key)
       effective[key] = key === "selectedBorder" ? String(v) : v
     }
-    return JSON.stringify({ stored: root.settings, effective: effective })
+    return JSON.stringify({ stored: root.settings, effective: effective, reduceMotion: Style.reduceMotion })
   }
 
   // "key=value" (value parsed as JSON, else taken as a string) or a JSON object.
@@ -1359,8 +1390,22 @@ Item {
   Process {
     id: wallpaperProc
     command: ["readlink", "-f", root.wallpaperLink]
-    stdout: StdioCollector { onStreamFinished: root.wallpaperPath = String(text || "").trim() }
+    stdout: StdioCollector { onStreamFinished: root.setWallpaperPath(String(text || "").trim()) }
   }
+  Process {
+    id: wallpaperSizeProc
+    property string path: ""
+    stdout: StdioCollector { id: wallpaperSizeOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      // The background changed while probing the old one: probe the new one.
+      if (path !== root.wallpaperPath) { root.probeWallpaperSize(); return }
+      var parts = String(wallpaperSizeOut.text || "").trim().split(" ")
+      var w = exitCode === 0 ? parseInt(parts[0], 10) : 0
+      var h = exitCode === 0 ? parseInt(parts[1], 10) : 0
+      root.wallpaperNative = { width: w > 0 ? w : 0, height: h > 0 ? h : 0 }
+    }
+  }
+
   onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryWindowProps()
 
   PanelWindow {
@@ -1396,8 +1441,10 @@ Item {
         Image {
           id: wallpaper
           anchors.fill: parent
-          source: root.backdropWallpaper ? Util.fileUrl(root.wallpaperPath) : ""
+          source: root.backdropWallpaper && root.wallpaperPath && root.wallpaperDecodeSize.width > 0
+            ? Util.fileUrl(root.wallpaperPath) : ""
           fillMode: Image.PreserveAspectCrop
+          sourceSize: root.wallpaperDecodeSize
           asynchronous: true
           cache: true
         }
@@ -1441,7 +1488,7 @@ Item {
           anchors.fill: parent
           // "all": stay hidden until the zoom starts (phase 2), then appear at once.
           opacity: root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0
-          Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+          Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
           transform: [
             Scale { origin.x: 0; origin.y: 0; xScale: root.zoomScale; yScale: root.zoomScale },
             Translate { x: root.zoomTX; y: root.zoomTY }
@@ -1503,7 +1550,7 @@ Item {
           border.color: root.matchCount === 0 ? root.urgent : root.selectedBorderColor
           opacity: (shown ? 1 : 0) * root.chromeOpacity
           visible: opacity > 0
-          Behavior on opacity { enabled: !root.closing; NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
+          Behavior on opacity { enabled: !root.closing; NumberAnimation { duration: Style.duration(100); easing.type: Easing.OutCubic } }
 
           Row {
             id: searchRow
