@@ -5,6 +5,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
+import qs.Ui
 import "components"
 import "OverviewModel.js" as Model
 
@@ -1286,7 +1287,10 @@ Item {
   Timer {
     id: flyTimer; interval: 45
     onTriggered: if (root.opened) {
-      var waiting = !root.windowPropsFresh || (root.animateAll && !root.homeThumbsReady())
+      // Also wait for OverlayWindow to show its content, so no start frames of
+      // the zoom or the flights play while it is still transparent.
+      var waiting = !root.windowPropsFresh || !panel.contentRevealed
+        || (root.animateAll && !root.homeThumbsReady())
       if (waiting && root.flyWaited < 300) {
         root.flyWaited += 30
         flyTimer.interval = 30
@@ -1408,18 +1412,16 @@ Item {
 
   onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryWindowProps()
 
-  PanelWindow {
+  // The shell's overlay surface (qs.Ui, Omarchy 4.5): maps on the focused output,
+  // keeps the content transparent until the output's size and scale are in
+  // (contentRevealed), survives a monitor unplug, mirrors for RTL languages.
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    screen: root.targetScreen
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
     WlrLayershell.namespace: "git-spren-overview"
-    WlrLayershell.layer: WlrLayer.Overlay
     // Released as soon as the close starts, so the chosen window gets focus (and
     // its active opacity) while still hidden under the overlay; see close().
-    WlrLayershell.keyboardFocus: root.closing ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
+    shownKeyboardFocus: root.closing ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
 
     // Everything fades out as one layer at the end of the close: faded item by
     // item, the backdrop would show through every half-transparent thumbnail.
