@@ -21,7 +21,10 @@ Item {
   property var manifest: null
 
   property bool opened: false
-  property var targetScreen: null
+  // The screen the overlay is on: OverlayWindow's while shown (it re-picks it
+  // after a monitor unplug), else the focused monitor's, so geometry and the
+  // wallpaper decode size (needed before the first open) agree with the surface.
+  readonly property var targetScreen: panel.targetScreen || panel.focusedScreen()
 
   // groups: [{ workspace, label, sub, toplevels: [HyprlandToplevel], firstIndex }], one per workspace
   // flat:   [{ group, item, toplevel }] in group order, for keyboard navigation
@@ -145,9 +148,8 @@ Item {
   // file's native size a 10k image costs a few hundred MB. Qt decodes up to cover
   // sourceSize, so a smaller image keeps its own size. The screen is known before
   // the first open, so the image is ready by then; 0x0 (no source) until probed.
-  readonly property var wallpaperScreen: root.targetScreen || root.screenForFocusedMonitor()
   readonly property size wallpaperDecodeSize: {
-    var scr = root.wallpaperScreen, nat = root.wallpaperNative
+    var scr = root.targetScreen, nat = root.wallpaperNative
     if (!scr || !nat) return Qt.size(0, 0)
     var w = Math.ceil(scr.width * scr.devicePixelRatio), h = Math.ceil(scr.height * scr.devicePixelRatio)
     if (nat.width > 0 && nat.height > 0 && (nat.width < w || nat.height < h)) return Qt.size(nat.width, nat.height)
@@ -157,12 +159,13 @@ Item {
     if (path === root.wallpaperPath && root.wallpaperNative) return
     root.wallpaperPath = path
     root.wallpaperNative = null
-    // Videos (OWE backgrounds) do not load in an Image; the scrim stands in.
-    if (!path || Util.isVideoPath(path)) return
     root.probeWallpaperSize()
   }
+  // Also the retry when the background changed during a probe, so the video
+  // check lives here: videos (OWE backgrounds) do not load in an Image and are
+  // never probed; the scrim stands in for them.
   function probeWallpaperSize() {
-    if (wallpaperSizeProc.running || !root.wallpaperPath) return
+    if (wallpaperSizeProc.running || !root.wallpaperPath || Util.isVideoPath(root.wallpaperPath)) return
     wallpaperSizeProc.path = root.wallpaperPath
     wallpaperSizeProc.command = ["magick", "identify", "-ping", "-format", "%w %h", root.wallpaperPath + "[0]"]
     wallpaperSizeProc.running = true
@@ -303,7 +306,6 @@ Item {
   function open(payloadJson) {
     if (root.closing) root.finishClose()
     root.closeTarget = null
-    root.targetScreen = root.screenForFocusedMonitor()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
     root.windowPropsFresh = false
@@ -407,16 +409,6 @@ Item {
   }
 
   // ---- data --------------------------------------------------------------
-
-  function screenForFocusedMonitor() {
-    var screens = Quickshell.screens
-    var mon = Hyprland.focusedMonitor
-    if (mon) {
-      for (var i = 0; i < screens.length; i++)
-        if (screens[i].name === mon.name) return screens[i]
-    }
-    return screens.length > 0 ? screens[0] : null
-  }
 
   function ipcOf(toplevel) {
     var ipc = toplevel ? toplevel.lastIpcObject : null
@@ -1226,7 +1218,9 @@ Item {
     var effective = ({})
     for (var key in root.settingDefaults) {
       var v = root.setting(key)
-      effective[key] = key === "selectedBorder" ? String(v) : v
+      // selectedBorder is a role or colour string; animate is what is in
+      // effect (reduceMotion forces "none"), the same value dump reports.
+      effective[key] = key === "selectedBorder" ? String(v) : key === "animate" ? root.animateMode : v
     }
     return JSON.stringify({ stored: root.settings, effective: effective, reduceMotion: Style.reduceMotion })
   }

@@ -133,9 +133,11 @@ their addresses).
 
 ## Install
 
-Requires Omarchy 4 (tested on 4.0.4 with Hyprland 0.56.2 and Quickshell 0.3.1). It needs
-nothing beyond what Omarchy already ships: it runs `hyprctl` (Hyprland) and `readlink`
-(coreutils) and uses Quickshell's Hyprland and Wayland modules.
+Requires Omarchy 4.5 or newer (tested on 4.5.0 with Hyprland 0.56.2 and Quickshell 0.3.2):
+the overlay is built on the shell's `OverlayWindow`, `I18n` and `Style` from that release.
+It needs nothing beyond what Omarchy already ships: it runs `hyprctl` (Hyprland), `readlink`
+(coreutils) and `magick identify` (ImageMagick, to size the wallpaper backdrop) and uses
+Quickshell's Hyprland and Wayland modules.
 
 ```sh
 omarchy plugin add https://github.com/git-spren/omarchy-overview --enable --yes
