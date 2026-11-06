@@ -2,7 +2,7 @@
 # Copy the plugin into the live Omarchy plugin directory and restart the shell.
 # The shell's inotify hot-reload re-creates the plugin Loader but Qt keeps the
 # old component cached, so edited QML only takes effect after a shell restart
-# (verified on Omarchy 4.0.4 / Quickshell 0.3.1). Pass --no-restart to skip it.
+# (verified on Omarchy 4.0.4 and 4.5.0). Pass --no-restart to skip it.
 set -euo pipefail
 restart=1
 [[ ${1-} == --no-restart ]] && restart=0
