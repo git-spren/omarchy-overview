@@ -116,13 +116,13 @@ Item {
   NumberAnimation {
     id: fillAnim
     target: thumb; property: "fillOpacity"; from: 0; to: 1
-    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut
   }
 
   NumberAnimation {
     id: contentAnim
     target: thumb; property: "contentOpacity"
-    duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic
+    duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut
   }
 
   // Registered with the overview so spatial (grid) navigation can compare
@@ -184,10 +184,10 @@ Item {
 
   ParallelAnimation {
     id: flyBackAnim
-    NumberAnimation { target: thumb; property: "flyDX"; to: thumb.backDX; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flyDY"; to: thumb.backDY; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flySX"; to: thumb.backSX; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flySY"; to: thumb.backSY; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flyDX"; to: thumb.backDX; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flyDY"; to: thumb.backDY; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flySX"; to: thumb.backSX; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flySY"; to: thumb.backSY; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     NumberAnimation { target: thumb; property: "captionOpacity"; to: 0; duration: overview ? Math.min(120, overview.animationMs) : 120; easing.type: Easing.OutCubic }
   }
 
@@ -199,10 +199,10 @@ Item {
 
   ParallelAnimation {
     id: flyAnim
-    NumberAnimation { target: thumb; property: "flyDX"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flyDY"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flySX"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
-    NumberAnimation { target: thumb; property: "flySY"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.OutCubic }
+    NumberAnimation { target: thumb; property: "flyDX"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flyDY"; to: 0; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flySX"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: thumb; property: "flySY"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     NumberAnimation { target: thumb; property: "captionOpacity"; to: 1; duration: overview ? overview.animationMs : 240; easing.type: Easing.InCubic }
   }
 
@@ -241,7 +241,7 @@ Item {
       Scale { origin.x: 0; origin.y: 0; xScale: thumb.flySX; yScale: thumb.flySY },
       Translate { x: thumb.flyDX; y: thumb.flyDY }
     ]
-    Behavior on scale { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(140); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut } }
 
     ScreencopyView {
       id: view

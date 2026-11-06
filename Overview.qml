@@ -1323,26 +1323,26 @@ Item {
 
   ParallelAnimation {
     id: zoomOutAnim
-    NumberAnimation { target: root; property: "zoomScale"; to: root.zoomToScale; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomTX"; to: root.zoomToTX; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomTY"; to: root.zoomToTY; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScale"; to: root.zoomToScale; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: root; property: "zoomTX"; to: root.zoomToTX; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: root; property: "zoomTY"; to: root.zoomToTY; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     // Landing on another workspace: keep the dim up while Hyprland switches underneath.
-    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.Bezier; easing.bezierCurve: Style.easeOut }
   }
 
   // "current" reverse: the chrome and the scrim fade while the thumbnails fly back.
   ParallelAnimation {
     id: chromeOutAnim
     NumberAnimation { target: root; property: "chromeOpacity"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 0; duration: root.animationMs; easing.type: root.closeTarget ? Easing.InCubic : Easing.Bezier; easing.bezierCurve: Style.easeOut }
   }
 
   ParallelAnimation {
     id: zoomAnim
-    NumberAnimation { target: root; property: "zoomScale"; to: 1; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomTX"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomTY"; to: 0; duration: root.animationMs; easing.type: Easing.OutCubic }
-    NumberAnimation { target: root; property: "zoomScrim"; to: 1; duration: root.animationMs; easing.type: Easing.OutCubic }
+    NumberAnimation { target: root; property: "zoomScale"; to: 1; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: root; property: "zoomTX"; to: 0; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: root; property: "zoomTY"; to: 0; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+    NumberAnimation { target: root; property: "zoomScrim"; to: 1; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
   }
   Timer { id: refreshTimer; interval: 120; onTriggered: Hyprland.refreshToplevels() }
   Timer { id: rebuildTimer; interval: 60; onTriggered: { Hyprland.refreshToplevels(); root.rebuild() } }
@@ -1588,7 +1588,9 @@ Item {
             Text {
               id: countText
               anchors.verticalCenter: parent.verticalCenter
-              text: root.matchCount === 0 ? "no match" : root.matchCount + " / " + root.flat.length
+              // Omarchy's own catalog string and the language's digits (I18n).
+              text: root.matchCount === 0 ? Commons.I18n.t("common.noMatches", "No matches")
+                : Commons.I18n.formatNumber(root.matchCount) + " / " + Commons.I18n.formatNumber(root.flat.length)
               color: root.matchCount === 0 ? root.urgent : root.muted
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // One occupied workspace, in one of three modes:
 //   columns: header on top, thumbnails stacked vertically
@@ -147,7 +148,7 @@ Item {
 
       Text {
         id: countText
-        text: group.count === 1 ? "1 window" : group.count + " windows"
+        text: (group.count === 1 ? "%1 window" : "%1 windows").arg(Commons.I18n.formatNumber(group.count))
         color: overview.muted
         font.family: overview.fontFamily
         font.pixelSize: Style.font.caption
