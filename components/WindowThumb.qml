@@ -367,13 +367,13 @@ Item {
   }
 
   MouseArea {
+    id: hoverArea
     anchors.fill: frame
     hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
+    // The area itself, not `this`: a signal handler's `this` is not the item.
     onPositionChanged: function(mouse) {
-      if (!overview) return
-      var p = mapToItem(null, mouse.x, mouse.y)
-      overview.pointerMoved(thumb.flatIndex, p.x, p.y)
+      if (overview) overview.pointerMoved(thumb.flatIndex, hoverArea, mouse)
     }
     onClicked: if (overview) overview.activate(thumb.toplevel)
   }

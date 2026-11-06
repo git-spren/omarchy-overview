@@ -67,10 +67,10 @@ Two Hyprland window tags keep private windows out of the overview:
 Tag one window from a terminal or a key binding:
 
 ```sh
-omarchy-shell shell call git-spren.overview redact ""          # the focused window
-omarchy-shell shell call git-spren.overview hide "keepass"     # the one window matching a search
-omarchy-shell shell call git-spren.overview redact 0x…         # an address (from `list ""`)
-omarchy-shell shell call git-spren.overview clear "keepass"    # remove both tags
+omarchy-shell git-spren.overview redact ""          # the focused window
+omarchy-shell git-spren.overview hide "keepass"     # the one window matching a search
+omarchy-shell git-spren.overview redact 0x…         # an address (from `list ""`)
+omarchy-shell git-spren.overview clear "keepass"    # remove both tags
 ```
 
 A search target is matched like the search box, over every window including hidden ones,
@@ -109,19 +109,21 @@ property, which Omarchy sets for 1Password and Bitwarden) are redacted as well. 
 
 ## Commands
 
-The overview can be scripted through the shell's IPC, e.g. from Hyprland bindings:
+The overview can be scripted through the shell's IPC, e.g. from Hyprland bindings. It is
+its own IPC target (`omarchy-shell git-spren.overview <command> <arg>`); the host route,
+`omarchy-shell shell call git-spren.overview <command> <arg>`, reaches the same commands.
 
 ```sh
 omarchy-shell shell toggle git-spren.overview '{"query":"fire"}'  # open with the search filled in
-omarchy-shell shell call git-spren.overview jump "fire"           # focus the best match, no overlay
-omarchy-shell shell call git-spren.overview list ""               # every window as JSON, hidden ones last
-omarchy-shell shell call git-spren.overview list "fire"           # only the matches
-omarchy-shell shell call git-spren.overview workspace 3           # while open: go to a workspace (id or name)
-omarchy-shell shell call git-spren.overview select 0x55d0c1a2b3c0 # while open: select a window
-omarchy-shell shell call git-spren.overview redact ""             # tag the focused window
-omarchy-shell shell call git-spren.overview hide "keepass"        # tag the one window matching a search
-omarchy-shell shell call git-spren.overview clear 0x55d0c1a2b3c0  # remove both tags
-omarchy-shell shell call git-spren.overview set "layout=rows"     # change a setting (see Settings)
+omarchy-shell git-spren.overview jump "fire"                      # focus the best match, no overlay
+omarchy-shell git-spren.overview list ""                          # every window as JSON, hidden ones last
+omarchy-shell git-spren.overview list "fire"                      # only the matches
+omarchy-shell git-spren.overview workspace 3                      # while open: go to a workspace (id or name)
+omarchy-shell git-spren.overview select 0x55d0c1a2b3c0            # while open: select a window
+omarchy-shell git-spren.overview redact ""                        # tag the focused window
+omarchy-shell git-spren.overview hide "keepass"                   # tag the one window matching a search
+omarchy-shell git-spren.overview clear 0x55d0c1a2b3c0             # remove both tags
+omarchy-shell git-spren.overview set "layout=rows"                # change a setting (see Settings)
 ```
 
 `jump`, `list` and the tag commands work while the overview is closed and use the same
@@ -181,10 +183,10 @@ own entry in `~/.config/omarchy/shell.json`, next to its `id`. All of them are o
 key uses its default. Change them from a terminal:
 
 ```sh
-omarchy-shell shell call git-spren.overview set "layout=rows"
-omarchy-shell shell call git-spren.overview set '{"zoom": 1.3, "animate": "current"}'
-omarchy-shell shell call git-spren.overview reset "zoom"   # back to the default; reset "" clears all
-omarchy-shell shell call git-spren.overview config ""      # stored and effective values as JSON
+omarchy-shell git-spren.overview set "layout=rows"
+omarchy-shell git-spren.overview set '{"zoom": 1.3, "animate": "current"}'
+omarchy-shell git-spren.overview reset "zoom"   # back to the default; reset "" clears all
+omarchy-shell git-spren.overview config ""      # stored and effective values as JSON
 ```
 
 `set` checks every value and refuses unknown keys or values, and only works while the overview
@@ -216,12 +218,12 @@ Disabling the plugin removes its entry, and its settings with it.
 ```sh
 omarchy plugin validate .                     # check the manifest
 bin/sync                                      # copy into the plugin dir and restart the shell
-omarchy-shell shell toggle git-spren.overview       # open / close
-omarchy-shell shell call git-spren.overview dump "" # current model as JSON
-omarchy-shell shell call git-spren.overview press down
-omarchy-shell shell call git-spren.overview type "fire"
-omarchy-shell shell call git-spren.overview config ""   # settings as JSON
-omarchy-shell shell call git-spren.overview redact ""   # tag the focused window (hide / clear too)
+omarchy-shell shell toggle git-spren.overview # open / close
+omarchy-shell git-spren.overview dump ""      # current model as JSON
+omarchy-shell git-spren.overview press down
+omarchy-shell git-spren.overview type "fire"
+omarchy-shell git-spren.overview config ""    # settings as JSON
+omarchy-shell git-spren.overview redact ""    # tag the focused window (hide / clear too)
 qs log -p /usr/share/omarchy/shell            # shell log (QML errors, settings warnings)
 ```
 

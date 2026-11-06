@@ -36,12 +36,6 @@ Item {
   // rebuild re-selects the active window (fresh focus data can arrive late),
   // so SUPER+E then Enter always returns to the window you came from.
   property bool selectionTouched: false
-  // Hover only selects after the pointer has really moved since open (Qt sends
-  // synthetic hover events when a surface appears under a still cursor), so a
-  // thumbnail that happens to sit under the pointer does not steal the selection.
-  property bool hoverArmed: false
-  property var hoverOrigin: null
-
   readonly property string pluginId: (root.manifest && root.manifest.id) || "git-spren.overview"
 
   // Theme: share the [menu] surface tokens like the other Omarchy overlays.
@@ -312,8 +306,7 @@ Item {
     root.queryWindowProps()
     root.refreshWallpaper()
     root.selectionTouched = false
-    root.hoverArmed = false
-    root.hoverOrigin = null
+    hoverGate.reset()
     root.selectedIndex = -1
     root.query = ""
     root.pendingFocus = null
@@ -740,14 +733,14 @@ Item {
     zoomOutAnim.start()
   }
 
-  // Called with scene coordinates on every pointer move over a thumbnail.
-  function pointerMoved(index, sx, sy) {
+  // Called from a thumbnail's MouseArea on every pointer move over it. Hover
+  // only selects once the pointer has really moved (hoverGate): Qt sends
+  // synthetic hover events when a surface appears, or a delegate moves, under
+  // a still cursor, and the thumbnail that happens to sit there must not steal
+  // the selection.
+  function pointerMoved(index, item, mouse) {
     if (root.closing) return
-    if (!root.hoverArmed) {
-      if (!root.hoverOrigin) { root.hoverOrigin = { x: sx, y: sy }; return }
-      if (Math.abs(sx - root.hoverOrigin.x) < 8 && Math.abs(sy - root.hoverOrigin.y) < 8) return
-      root.hoverArmed = true
-    }
+    if (!hoverGate.moved(item, mouse)) return
     if (!root.isMatch(index)) return
     root.selectionTouched = true
     root.selectedIndex = index
@@ -1405,6 +1398,41 @@ Item {
   }
 
   onRedactNoScreenShareChanged: if (root.redactNoScreenShare) root.queryWindowProps()
+
+  // The shell's hover filter (qs.Ui, used by its menu and clipboard): positions
+  // are compared in the panel's coordinates, so delegates flying under a still
+  // pointer do not count as movement; 8 px since the last accepted move does.
+  PointerMoveGate {
+    id: hoverGate
+    threshold: 8
+    referenceItem: panel.contentItem
+  }
+
+  // Our own IPC target (qs.Commons ShellIpc, Omarchy 4.5), answered over the
+  // shell's socket: `omarchy-shell git-spren.overview jump "fire"`. The host
+  // route `omarchy-shell shell call git-spren.overview jump "fire"` keeps
+  // working; both reach the same root functions. Every function takes one
+  // string and answers a string (qs ipc needs the types; "ok" for no result).
+  ShellIpc {
+    target: root.pluginId
+    function dump(arg: string): string { return root.ipcResult(root.dump(arg)) }
+    function list(query: string): string { return root.ipcResult(root.list(query)) }
+    function jump(query: string): string { return root.ipcResult(root.jump(query)) }
+    function press(name: string): string { return root.ipcResult(root.press(name)) }
+    function type(text: string): string { return root.ipcResult(root.type(text)) }
+    function workspace(name: string): string { return root.ipcResult(root.workspace(name)) }
+    function select(address: string): string { return root.ipcResult(root.select(address)) }
+    function hide(target: string): string { return root.ipcResult(root.hide(target)) }
+    function redact(target: string): string { return root.ipcResult(root.redact(target)) }
+    function clear(target: string): string { return root.ipcResult(root.clear(target)) }
+    function config(arg: string): string { return root.ipcResult(root.config(arg)) }
+    function set(arg: string): string { return root.ipcResult(root.set(arg)) }
+    function reset(arg: string): string { return root.ipcResult(root.reset(arg)) }
+  }
+  // What the host's `shell call` answers for a function without a result.
+  function ipcResult(result) {
+    return result === undefined || result === null ? "ok" : String(result)
+  }
 
   // The shell's overlay surface (qs.Ui, Omarchy 4.5): maps on the focused output,
   // keeps the content transparent until the output's size and scale are in
