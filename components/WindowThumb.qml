@@ -32,7 +32,7 @@ Item {
   // A redacted window never gets content; count it as ready for the zoom wait.
   readonly property bool hasContent: redacted || pending || view.hasContent
   // Recaptured while open: only windows whose workspace is on screen change.
-  readonly property bool refreshing: overview !== null && overview.opened && !redacted && !pending
+  readonly property bool refreshing: overview !== null && overview.opened && !overview.desktopMode && !redacted && !pending
     && toplevel !== null && toplevel.workspace !== null && toplevel.workspace.active
   // Search: windows that do not match the typed query are dimmed.
   readonly property bool matched: overview === null || overview.matches(toplevel, overview.query)
@@ -262,7 +262,7 @@ Item {
       target: thumb.overview
       // A view without content is still on its automatic first capture.
       function onCaptureTickChanged() { if (thumb.refreshing && view.hasContent) view.captureFrame() }
-      function onOpenedChanged() { if (thumb.overview.opened && view.hasContent && !thumb.redacted && !thumb.pending) view.captureFrame() }
+      function onOpenedChanged() { if (thumb.overview.opened && !thumb.overview.desktopMode && view.hasContent && !thumb.redacted && !thumb.pending) view.captureFrame() }
     }
 
     Rectangle {

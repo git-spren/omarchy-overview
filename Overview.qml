@@ -83,6 +83,7 @@ Item {
   //                   window-rule property are redacted like overview-redact | false
   //   backdrop:       "wallpaper" (default) - the desktop background behind the
   //                   thumbnails, lightly dimmed | "dim" - the dark menu scrim
+  //   desktopStrip:   desktop peek - px of each window left on screen (default 32, 8-200)
   readonly property string shellConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
   // Our entry's fields (without "id"); {} = all defaults.
   property var settings: ({})
@@ -132,6 +133,7 @@ Item {
   property int captureTick: 0
   readonly property bool redactNoScreenShare: root.setting("redactNoScreenShare")
   readonly property bool backdropWallpaper: root.setting("backdrop") === "wallpaper"
+  readonly property int desktopStrip: root.setting("desktopStrip")
   // Omarchy's current background (the link omarchy-theme-bg-set points), resolved
   // with readlink so a new background shows on the next open.
   readonly property string wallpaperLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
@@ -165,6 +167,12 @@ Item {
     wallpaperSizeProc.running = true
   }
   function refreshWallpaper() { if (!wallpaperProc.running) wallpaperProc.running = true }
+  // The desktop peek draws the wallpaper itself; a video background or an
+  // unreadable file cannot be shown (not probed yet counts as usable).
+  function wallpaperUsable() {
+    return root.wallpaperPath !== "" && !Util.isVideoPath(root.wallpaperPath)
+      && !(root.wallpaperNative && !(root.wallpaperNative.width > 0))
+  }
   readonly property real closeFadeEndPct: root.setting("closeFadeEnd")
   readonly property real closeFadeStartPct: Math.min(root.setting("closeFadeStart"), root.closeFadeEndPct)
 
@@ -205,6 +213,86 @@ Item {
   // ms spent waiting (after the 45 ms geometry wait) for the current
   // workspace's captures, so the 1:1 start frame shows real content.
   property int flyWaited: 0
+
+  // ---- desktop peek ("show desktop") ---------------------------------------
+  // A second mode of the overlay (open payload {"mode":"desktop"}, or the
+  // `desktop` IPC function): the wallpaper plus a capture of every window
+  // visible on this monitor, each at its real place, then slid toward the
+  // screen edge nearest its centre until desktopStrip px are left. Nothing in
+  // Hyprland moves; closing slides the captures back onto the real windows.
+  property bool desktopMode: false
+  // Windows in stacking order (bottom first) and, per address, their place:
+  // { rect, edge, dx, dy } in overlay coordinates. Kept apart so a geometry
+  // update does not re-create the delegates (and their captures).
+  property var peek: []
+  property string peekSignature: ""
+  property var peekGeom: ({})
+  // What the peek covers: the monitor without the bar's reserved zone, so the
+  // live bar stays visible; the whole monitor under a fullscreen window.
+  property var peekArea: ({ x: 0, y: 0, w: 0, h: 0 })
+  // 0 = windows at their real place, 1 = pushed to the edges.
+  property real peekProgress: 0
+  property var peekItems: []
+  function registerPeek(item) { root.peekItems.push(item) }
+  function unregisterPeek(item) {
+    var i = root.peekItems.indexOf(item)
+    if (i >= 0) root.peekItems.splice(i, 1)
+  }
+  function peekReady() {
+    for (var i = 0; i < root.peekItems.length; i++)
+      if (!root.peekItems[i].hasContent) return false
+    return true
+  }
+
+  // Stacking rank: fullscreen over floating over tiled, then most recently focused on top.
+  function peekRank(toplevel) {
+    var ipc = root.ipcOf(toplevel)
+    if (!ipc) return 0
+    var tier = ipc.fullscreen >= 2 ? 2 : ipc.floating ? 1 : 0
+    var hist = typeof ipc.focusHistoryID === "number" ? Math.min(Math.max(ipc.focusHistoryID, 0), 9999) : 9999
+    return tier * 10000 + (9999 - hist)
+  }
+
+  function rebuildPeek() {
+    var mon = root.monitorLogicalRect(Hyprland.focusedMonitor)
+    var wins = []
+    var all = Hyprland.toplevels.values
+    for (var i = 0; i < all.length; i++) {
+      var t = all[i]
+      if (root.isHidden(t)) continue
+      var r = root.flySource(t)
+      if (r) wins.push({ toplevel: t, rect: r, rank: root.peekRank(t) })
+    }
+    wins.sort(function(a, b) { return a.rank - b.rank })
+    var area = { x: 0, y: 0, w: mon.w, h: mon.h }
+    var fullscreen = wins.some(function(w) { var ipc = root.ipcOf(w.toplevel); return !!ipc && ipc.fullscreen >= 2 })
+    var ipcMon = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.lastIpcObject : null
+    var res = ipcMon && typeof ipcMon === "object" ? ipcMon.reserved : null   // left, top, right, bottom
+    if (!fullscreen && res && res.length === 4) {
+      var l = Math.max(0, res[0]), tp = Math.max(0, res[1]), rt = Math.max(0, res[2]), bt = Math.max(0, res[3])
+      if (l + rt < mon.w && tp + bt < mon.h) area = { x: l, y: tp, w: mon.w - l - rt, h: mon.h - tp - bt }
+    }
+    var offsets = Model.peekOffsets(wins.map(function(w) { return w.rect }), area, root.desktopStrip)
+    var geom = ({})
+    for (var k = 0; k < wins.length; k++)
+      geom[wins[k].toplevel.address] = { rect: wins[k].rect, edge: offsets[k].edge, dx: offsets[k].dx, dy: offsets[k].dy }
+    root.peekArea = area
+    root.peekGeom = geom
+    var signature = wins.map(function(w) { return w.toplevel.address }).join(",")
+    if (signature !== root.peekSignature || root.peek.length !== wins.length) {
+      root.peekSignature = signature
+      root.peek = wins.map(function(w) { return w.toplevel })
+    }
+  }
+
+  // Toggle the peek: `omarchy-shell git-spren.overview desktop ""`. While
+  // anything of ours is open it closes that, like the toggle key would.
+  function desktop(arg) {
+    if (root.opened) { root.dismiss(); return "ok" }
+    if (!root.wallpaperUsable()) return "no wallpaper image to show"
+    if (!root.shell || typeof root.shell.summon !== "function") return "the host does not allow opening"
+    return root.shell.summon(root.pluginId, JSON.stringify({ mode: "desktop" })) ? "ok" : "not opened"
+  }
 
   function applyShellConfig(text) {
     var config
@@ -299,6 +387,19 @@ Item {
 
   function open(payloadJson) {
     if (root.closing) root.finishClose()
+    // Payload options: {"query": "..."} opens with the search filled in,
+    // {"mode": "desktop"} opens the desktop peek instead of the overview.
+    var payload = null
+    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { console.warn("overview: bad payload", payloadJson) }
+    root.desktopMode = !!payload && payload.mode === "desktop"
+    if (root.desktopMode && !root.wallpaperUsable()) {
+      // Without the wallpaper the real windows would show through. The host
+      // already counts us as open: tell it otherwise.
+      console.warn("git-spren.overview: no wallpaper image, not showing the desktop")
+      root.desktopMode = false
+      Qt.callLater(root.dismiss)
+      return
+    }
     root.closeTarget = null
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
@@ -312,18 +413,17 @@ Item {
     root.pendingFocus = null
     refocusTimer.stop()
     root.rebuild()
-    // Payload options: {"query": "..."} opens with the search filled in.
-    var payload = null
-    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { console.warn("overview: bad payload", payloadJson) }
-    if (payload && typeof payload.query === "string")
+    if (!root.desktopMode && payload && typeof payload.query === "string")
       root.setQuery(payload.query.replace(/[\x00-\x1f\x7f]/g, ""))
-    // Without animation the reveal still waits for the window properties.
-    root.flyPhase = root.animate || !root.windowPropsFresh ? 1 : 2
+    // Without animation the reveal still waits for the window properties
+    // (and the peek for its captures and the wallpaper).
+    root.peekProgress = 0
+    root.flyPhase = root.animate || root.desktopMode || !root.windowPropsFresh ? 1 : 2
     // "all" fades the backdrop in with the zoom; without this the capture wait
     // (phase 1, up to 300 ms) shows it at full strength over the live desktop.
     root.zoomScrim = root.animateAll ? 0 : 1
     root.flyWaited = 0
-    flyTimer.interval = root.animate ? 45 : 15   // a close during the capture wait leaves it at 30
+    flyTimer.interval = root.animate || root.desktopMode ? 45 : 15   // a close during the capture wait leaves it at 30
     root.opened = true
     if (root.flyPhase === 1) flyTimer.restart()
     // IPC data (window positions) arrives a moment later; re-sort once it does.
@@ -344,7 +444,10 @@ Item {
     // overlay instead of snapping opaque after the fade. finishClose() repeats it.
     if (root.pendingFocus) refocusTimer.restart()
     flyTimer.stop(); flyEndTimer.stop(); settleTimer.stop(); rebuildTimer.stop()
-    if (root.animateAll) {
+    if (root.desktopMode) {
+      peekAnim.stop()
+      peekBackAnim.start()
+    } else if (root.animateAll) {
       root.startZoomBack()
     } else {
       root.flying = true
@@ -357,8 +460,12 @@ Item {
 
   function finishClose() {
     closeTimer.stop(); zoomAnim.stop(); zoomOutAnim.stop(); chromeOutAnim.stop(); closeFadeAnim.stop()
-    flyTimer.stop(); flyEndTimer.stop()
+    flyTimer.stop(); flyEndTimer.stop(); peekAnim.stop(); peekBackAnim.stop()
     root.opened = false
+    // The peek keeps no delegates (and no captures) while closed.
+    if (root.desktopMode) { root.peek = []; root.peekSignature = ""; root.peekGeom = ({}) }
+    root.desktopMode = false
+    root.peekProgress = 0
     // Clear the search while `closing` still disables the pill's fade: left for
     // open() to clear, the empty pill faded out over the opening frames.
     root.query = ""
@@ -531,6 +638,8 @@ Item {
   }
 
   function rebuild() {
+    // The peek has its own model; the overview's is rebuilt on its next open.
+    if (root.desktopMode) { root.rebuildPeek(); return }
     var selectedAddress = root.selectionTouched && root.selectedToplevel() ? root.selectedToplevel().address : ""
     var multiMonitor = Hyprland.monitors.values.length > 1
     var groups = [], flat = []
@@ -976,6 +1085,8 @@ Item {
   function handleKey(event) {
     var k = event.key
     if (root.closing) { if (k === Qt.Key_Escape) root.finishClose(); return true }
+    // Desktop peek: Escape restores the windows, every other key is swallowed.
+    if (root.desktopMode) { if (k === Qt.Key_Escape) root.dismiss(); return true }
     var mods = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
     if (k === Qt.Key_Escape) { if (root.query !== "") root.setQuery(""); else root.dismiss(); return true }
     // Backspace / Ctrl+Backspace / Ctrl+U, shared with the shell's own search
@@ -1033,7 +1144,7 @@ Item {
 
   // Type text into the search as if it were typed (`call git-spren.overview type "fire"`).
   function type(text) {
-    if (!root.opened || root.closing) return "ignored"
+    if (!root.opened || root.closing || root.desktopMode) return "ignored"
     root.setQuery(root.query + String(text || "").replace(/[\x00-\x1f\x7f]/g, ""))
     return "ok"
   }
@@ -1076,7 +1187,7 @@ Item {
   // (not "focus": that is Item.focus, like "state" below)
   function jump(query) {
     var q = String(query || "")
-    if (q.trim() === "" || root.closing) return "ignored"
+    if (q.trim() === "" || root.closing || root.desktopMode) return "ignored"
     var best = null, bestScore = -1
     root.orderedWorkspaces().forEach(function(g) {
       g.toplevels.forEach(function(t) {
@@ -1094,7 +1205,7 @@ Item {
 
   // While open: go to a workspace by id or name, like its digit key.
   function workspace(name) {
-    if (!root.opened || root.closing) return "ignored"
+    if (!root.opened || root.closing || root.desktopMode) return "ignored"
     var s = String(name || "").trim()
     if (/^-?\d+$/.test(s)) return root.focusWorkspaceById(parseInt(s, 10)) ? "ok" : "unknown workspace: " + s
     var all = Hyprland.workspaces.values
@@ -1107,7 +1218,7 @@ Item {
 
   // While open: select a window by address (with or without 0x).
   function select(address) {
-    if (!root.opened || root.closing) return "ignored"
+    if (!root.opened || root.closing || root.desktopMode) return "ignored"
     var a = String(address || "").trim().replace(/^0x/i, "").toLowerCase()
     for (var i = 0; i < root.flat.length; i++) {
       if (String(root.flat[i].toplevel.address).replace(/^0x/i, "").toLowerCase() !== a) continue
@@ -1198,6 +1309,15 @@ Item {
                             closeFadeStart: root.closeFadeStartPct, closeFadeEnd: root.closeFadeEndPct,
                             refreshRate: root.refreshRate, redactNoScreenShare: root.redactNoScreenShare,
                             backdrop: root.setting("backdrop"), wallpaper: root.wallpaperPath,
+                            desktopStrip: root.desktopStrip,
+                            mode: root.desktopMode ? "desktop" : "overview",
+                            peekArea: root.desktopMode ? root.peekArea : null,
+                            peekProgress: root.peekProgress,
+                            peek: root.peek.map(function(t) {
+                              var g = root.peekGeom[t.address] || {}
+                              return { address: t.address, redacted: root.isRedacted(t),
+                                       rect: g.rect, edge: g.edge, dx: g.dx, dy: g.dy }
+                            }),
                             reduceMotion: Style.reduceMotion,
                             flyPhase: root.flyPhase, selectionTouched: root.selectionTouched, groups: groups })
   }
@@ -1277,19 +1397,30 @@ Item {
       // Also wait for OverlayWindow to show its content, so no start frames of
       // the zoom or the flights play while it is still transparent.
       var waiting = !root.windowPropsFresh || !panel.contentRevealed
-        || (root.animateAll && !root.homeThumbsReady())
-      if (waiting && root.flyWaited < 300) {
+        || (root.desktopMode ? !root.peekReady() : root.animateAll && !root.homeThumbsReady())
+      // The peek cannot start without its wallpaper (the real windows would
+      // show through), so that gets longer, and then the peek gives up.
+      var noWallpaper = root.desktopMode && wallpaper.status !== Image.Ready
+      if ((waiting && root.flyWaited < 300) || (noWallpaper && root.flyWaited < 1500)) {
         root.flyWaited += 30
         flyTimer.interval = 30
         flyTimer.restart()
         return
       }
+      if (noWallpaper) {
+        console.warn("git-spren.overview: the wallpaper did not load, not showing the desktop")
+        root.dismissNow()
+        return
+      }
       // No answer in time: fail closed, every window uncaptured until it lands.
       if (!root.windowPropsFresh) root.noScreenShare = ({})
       flyTimer.interval = 45
-      root.flying = root.animateCurrent
+      root.flying = root.animateCurrent && !root.desktopMode
       root.flyPhase = 2
-      if (root.animateAll) root.startZoomAll()
+      if (root.desktopMode) {
+        if (root.animate) peekAnim.start()
+        else root.peekProgress = 1
+      } else if (root.animateAll) root.startZoomAll()
       flyEndTimer.restart()
     }
   }
@@ -1335,6 +1466,9 @@ Item {
     NumberAnimation { target: root; property: "zoomTY"; to: 0; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     NumberAnimation { target: root; property: "zoomScrim"; to: 1; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
   }
+  // Desktop peek: out to the edges, and back onto the real windows.
+  NumberAnimation { id: peekAnim; target: root; property: "peekProgress"; to: 1; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+  NumberAnimation { id: peekBackAnim; target: root; property: "peekProgress"; to: 0; duration: root.animationMs; easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
   Timer { id: refreshTimer; interval: 120; onTriggered: Hyprland.refreshToplevels() }
   Timer { id: rebuildTimer; interval: 60; onTriggered: { Hyprland.refreshToplevels(); root.rebuild() } }
 
@@ -1349,6 +1483,9 @@ Item {
         if (addr !== root.lastActiveAddress) { root.lastActiveAddress = addr; root.scheduleRebuild() }
       } else if (/^(openwindow|closewindow|movewindow(v2)?|workspace(v2)?|createworkspace(v2)?|destroyworkspace(v2)?|focusedmon(v2)?|changefloatingmode|fullscreen)$/.test(name))
         root.scheduleRebuild()
+      // The peek shows one workspace's windows: a switch underneath ends it.
+      if (root.desktopMode && root.opened && !root.closing && /^(workspace(v2)?|focusedmon(v2)?)$/.test(name))
+        root.dismissNow()
       // The close released the keyboard and Hyprland moved focus back to the
       // window from before the overlay (which can switch workspace): put it on
       // the chosen window again while the overlay still covers the screen.
@@ -1428,6 +1565,7 @@ Item {
     function config(arg: string): string { return root.ipcResult(root.config(arg)) }
     function set(arg: string): string { return root.ipcResult(root.set(arg)) }
     function reset(arg: string): string { return root.ipcResult(root.reset(arg)) }
+    function desktop(arg: string): string { return root.ipcResult(root.desktop(arg)) }
   }
   // What the host's `shell call` answers for a function without a result.
   function ipcResult(result) {
@@ -1457,15 +1595,24 @@ Item {
       // the desktop shows (same crop), so it appears at once with the content and
       // only the dim follows the zoom: the close then lands on exactly what the
       // desktop shows, and the overlay's final fade has nothing to cross over.
+      // The desktop peek shows it undimmed and only over peekArea (clipped,
+      // the image staying in place), which leaves the live bar visible.
       Item {
-        anchors.fill: parent
-        visible: root.backdropWallpaper && wallpaper.status === Image.Ready
+        x: root.desktopMode ? root.peekArea.x : 0
+        y: root.desktopMode ? root.peekArea.y : 0
+        width: root.desktopMode ? root.peekArea.w : parent.width
+        height: root.desktopMode ? root.peekArea.h : parent.height
+        clip: root.desktopMode
+        visible: (root.backdropWallpaper || root.desktopMode) && wallpaper.status === Image.Ready
         opacity: root.opened && root.flyPhase >= 2 ? 1 : 0
 
         Image {
           id: wallpaper
-          anchors.fill: parent
-          source: root.backdropWallpaper && root.wallpaperPath && root.wallpaperDecodeSize.width > 0
+          x: -parent.x
+          y: -parent.y
+          width: panel.width
+          height: panel.height
+          source: (root.backdropWallpaper || root.desktopMode) && root.wallpaperPath && root.wallpaperDecodeSize.width > 0
             ? Util.fileUrl(root.wallpaperPath) : ""
           fillMode: Image.PreserveAspectCrop
           sourceSize: root.wallpaperDecodeSize
@@ -1475,14 +1622,14 @@ Item {
         Rectangle {
           anchors.fill: parent
           color: Util.alpha(Commons.Color.background, 0.35)
-          opacity: root.zoomScrim
+          opacity: root.desktopMode ? 0 : root.zoomScrim
         }
       }
 
       // Backdrop "dim" (and the wallpaper's fallback until it has loaded).
       Rectangle {
         anchors.fill: parent
-        visible: !root.backdropWallpaper || wallpaper.status !== Image.Ready
+        visible: !root.desktopMode && (!root.backdropWallpaper || wallpaper.status !== Image.Ready)
         color: root.scrim
         opacity: root.zoomScrim
       }
@@ -1490,7 +1637,7 @@ Item {
       // Extra dimming so thumbnails read against a busy desktop.
       Rectangle {
         anchors.fill: parent
-        visible: !root.backdropWallpaper || wallpaper.status !== Image.Ready
+        visible: !root.desktopMode && (!root.backdropWallpaper || wallpaper.status !== Image.Ready)
         color: Util.alpha(Commons.Color.background, 0.55)
         opacity: root.zoomScrim
       }
@@ -1507,9 +1654,31 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) { event.accepted = root.handleKey(event) }
 
+        // Desktop peek: the windows, clipped to the same area as the wallpaper.
+        Item {
+          x: root.peekArea.x
+          y: root.peekArea.y
+          width: root.peekArea.w
+          height: root.peekArea.h
+          clip: true
+          visible: root.desktopMode
+          opacity: root.opened && root.flyPhase >= 2 ? 1 : 0
+
+          Repeater {
+            model: root.peek
+
+            DesktopWindow {
+              required property var modelData
+              overview: root
+              toplevel: modelData
+            }
+          }
+        }
+
         Item {
           id: content
           anchors.fill: parent
+          visible: !root.desktopMode
           // "all": stay hidden until the zoom starts (phase 2), then appear at once.
           opacity: root.opened && !(root.animateAll && root.flyPhase < 2) ? 1 : 0
           Behavior on opacity { enabled: !root.animateAll && !root.closing; NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
