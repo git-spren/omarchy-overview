@@ -1,12 +1,12 @@
 // Stateless logic of the overview: settings parsing, search scoring, Lua
-// quoting, privacy-tag and window-property parsing, spatial navigation and the
-// grid column choice. Plain data in, plain data out, so tests/ can run it under
+// quoting, privacy-tag and window-property parsing, spatial navigation, the
+// grid column choice and the desktop peek geometry. Plain data in, plain data out, so tests/ can run it under
 // node; Overview.qml wraps these with the Hyprland / Quickshell objects.
 
 var settingDefaults = {
   zoom: "medium", selectedBorder: "accent", layout: "grid", animate: "all",
   animationDuration: 350, closeFadeStart: 80, closeFadeEnd: 95, refreshRate: 4,
-  redactNoScreenShare: true, backdrop: "wallpaper"
+  redactNoScreenShare: true, backdrop: "wallpaper", desktopStrip: 32
 }
 
 var zoomLevels = { small: 1.02, medium: 1.10, large: 1.20 }
@@ -49,6 +49,8 @@ function parseSetting(key, raw) {
     return raw === true || raw === false ? raw : undefined
   case "backdrop":
     return s === "wallpaper" || s === "dim" ? s : undefined
+  case "desktopStrip":
+    return isFinite(n) && n >= 8 && n <= 200 ? Math.round(n) : undefined
   }
   return undefined
 }
@@ -274,6 +276,52 @@ function gridMetrics(n, availW, availH, colGap, rowGap, headerH, aspect) {
   return best
 }
 
+// Desktop peek: the edge of `area` ({ x, y, w, h }) nearest the centre of
+// `rect`, as "bottom" | "left" | "top" | "right"; ties resolve in that order
+// (a window centred on the area, e.g. a fullscreen one, goes down).
+var peekEdges = ["bottom", "left", "top", "right"]
+
+function peekEdge(rect, area) {
+  var cx = rect.x + rect.w / 2 - area.x, cy = rect.y + rect.h / 2 - area.y
+  var dist = [area.h - cy, cx, cy, area.w - cx]
+  var best = 0
+  for (var i = 1; i < 4; i++) if (dist[i] < dist[best]) best = i
+  return peekEdges[best]
+}
+
+// Most strips one edge stacks up for windows that overlap there.
+var peekLevels = 3
+
+// Desktop peek: how far each window slides so that only a strip of it stays
+// inside `area`. `rects` are in stacking order, bottom first; the result has
+// one { edge, dx, dy, level } per rect. A window moves along one axis, toward
+// the edge nearest its centre, and never inward (one already further out
+// stays put). Windows on the same edge that overlap along it fan out: the
+// topmost keeps `strip` px, each one below it one strip more (level 1, 2),
+// so its strip shows beside the one above; from peekLevels on they share
+// the last slot.
+function peekOffsets(rects, area, strip) {
+  var out = []
+  for (var i = rects.length - 1; i >= 0; i--) {
+    var r = rects[i], edge = peekEdge(r, area), horizontal = edge === "left" || edge === "right"
+    var level = 0
+    for (var j = i + 1; j < rects.length; j++) {
+      var o = rects[j]
+      if (out[j].edge !== edge) continue
+      var overlap = horizontal ? (o.y < r.y + r.h && o.y + o.h > r.y) : (o.x < r.x + r.w && o.x + o.w > r.x)
+      if (overlap) level = Math.max(level, out[j].level + 1)
+    }
+    level = Math.min(level, peekLevels - 1)
+    var keep = strip * (level + 1), dx = 0, dy = 0
+    if (edge === "left") dx = Math.min(0, area.x + keep - r.w - r.x)
+    else if (edge === "right") dx = Math.max(0, area.x + area.w - keep - r.x)
+    else if (edge === "top") dy = Math.min(0, area.y + keep - r.h - r.y)
+    else dy = Math.max(0, area.y + area.h - keep - r.y)
+    out[i] = { edge: edge, dx: dx, dy: dy, level: level }
+  }
+  return out
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     settingDefaults: settingDefaults,
@@ -292,6 +340,8 @@ if (typeof module !== "undefined") {
     fuzzyScore: fuzzyScore,
     matchScore: matchScore,
     pickSpatial: pickSpatial,
-    gridMetrics: gridMetrics
+    gridMetrics: gridMetrics,
+    peekEdge: peekEdge,
+    peekOffsets: peekOffsets
   }
 }

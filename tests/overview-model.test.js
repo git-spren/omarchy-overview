@@ -198,4 +198,64 @@ test("gridMetrics: widest boxes for the aspect ratio", () => {
   assert.ok(wide.boxW > 0)
 })
 
+test("parseSetting: desktopStrip range", () => {
+  assert.equal(M.settingDefaults.desktopStrip, 32)
+  assert.equal(M.parseSetting("desktopStrip", 32), 32)
+  assert.equal(M.parseSetting("desktopStrip", "48.4"), 48)
+  assert.equal(M.parseSetting("desktopStrip", 7), undefined)
+  assert.equal(M.parseSetting("desktopStrip", 201), undefined)
+  assert.equal(M.parseSetting("desktopStrip", "wide"), undefined)
+})
+
+const area = { x: 0, y: 0, w: 2560, h: 1440 }
+function rect(x, y, w, h) { return { x, y, w, h } }
+
+test("peekEdge: nearest edge of the centre, ties bottom then left", () => {
+  assert.equal(M.peekEdge(rect(0, 0, 1280, 1440), area), "left")
+  assert.equal(M.peekEdge(rect(1280, 0, 1280, 1440), area), "right")
+  assert.equal(M.peekEdge(rect(1280, 0, 1280, 720), area), "top")
+  assert.equal(M.peekEdge(rect(1280, 720, 1280, 720), area), "bottom")
+  assert.equal(M.peekEdge(rect(0, 0, 2560, 1440), area), "bottom")       // fullscreen: top/bottom tie
+  assert.equal(M.peekEdge(rect(0, 720, 1440, 1440), area), "bottom")     // bottom/left tie
+  assert.equal(M.peekEdge(rect(0, 0, 1000, 1000), area), "left")         // left/top tie
+  // The area's origin counts (work area below a bar).
+  assert.equal(M.peekEdge(rect(100, 40, 2360, 300), { x: 0, y: 40, w: 2560, h: 1400 }), "top")
+})
+
+test("peekOffsets: a strip stays inside the area, one axis only", () => {
+  const o = M.peekOffsets([rect(10, 10, 1260, 1420), rect(1290, 10, 1260, 700), rect(1290, 730, 1260, 700)], area, 32)
+  assert.deepEqual(o[0], { edge: "left", dx: 32 - 1260 - 10, dy: 0, level: 0 })
+  assert.deepEqual(o[1], { edge: "top", dx: 0, dy: 32 - 700 - 10, level: 0 })
+  assert.deepEqual(o[2], { edge: "bottom", dx: 0, dy: 1440 - 32 - 730, level: 0 })
+  const r = M.peekOffsets([rect(1290, 10, 1260, 1420)], area, 50)[0]
+  assert.deepEqual(r, { edge: "right", dx: 2560 - 50 - 1290, dy: 0, level: 0 })
+  // An offset work area: the strip sits below the bar, not under it.
+  const t = M.peekOffsets([rect(100, 50, 2360, 300)], { x: 0, y: 40, w: 2560, h: 1400 }, 32)[0]
+  assert.deepEqual(t, { edge: "top", dx: 0, dy: 40 + 32 - 300 - 50, level: 0 })
+  assert.deepEqual(M.peekOffsets([], area, 32), [])
+})
+
+test("peekOffsets: never inward", () => {
+  // Already further out than the strip: stays put.
+  assert.equal(M.peekOffsets([rect(-1250, 100, 1260, 600)], area, 32)[0].dx, 0)
+  assert.equal(M.peekOffsets([rect(600, 1430, 800, 600)], area, 32)[0].dy, 0)
+})
+
+test("peekOffsets: overlapping windows on one edge fan out, topmost outermost", () => {
+  // Bottom first: a tiled window, then two floating ones over it, all going left.
+  const o = M.peekOffsets([rect(0, 0, 1000, 1440), rect(100, 300, 600, 400), rect(150, 500, 600, 400)], area, 32)
+  assert.deepEqual(o.map((p) => p.level), [2, 1, 0])
+  assert.equal(o[2].dx, 32 - 600 - 150)
+  assert.equal(o[1].dx, 64 - 600 - 100)
+  assert.equal(o[0].dx, 96 - 1000)
+  // No overlap along the edge: same level. More than three: share the last slot.
+  const apart = M.peekOffsets([rect(0, 0, 800, 600), rect(0, 800, 800, 600)], area, 32)
+  assert.deepEqual(apart.map((p) => p.level), [0, 0])
+  const many = M.peekOffsets([1, 2, 3, 4, 5].map(() => rect(0, 0, 800, 1440)), area, 32)
+  assert.deepEqual(many.map((p) => p.level), [2, 2, 2, 1, 0])
+  // Another edge does not count.
+  const mixed = M.peekOffsets([rect(0, 0, 1000, 1440), rect(1500, 0, 1000, 1440)], area, 32)
+  assert.deepEqual(mixed.map((p) => p.level), [0, 0])
+})
+
 if (failed) { console.log(failed + " failed"); process.exit(1) }
