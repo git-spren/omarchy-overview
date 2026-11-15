@@ -121,7 +121,8 @@ wallpaper; with a video background the command answers `no wallpaper image to sh
 
 | Key | Action |
 |---|---|
-| `SUPER + F3` | open / close the overview (see [Install](#install)) |
+| `F3` | open / close the overview (see [Install](#install)) |
+| `SUPER + F3` | show desktop: push the windows aside / bring them back |
 | arrows | move the selection (spatial in grid; wraps around) |
 | `Tab` / `Shift+Tab` | next / previous window |
 | `Enter` (`Space` while the query is empty) | focus the selected window |
@@ -175,9 +176,12 @@ From a checkout, `bin/install` does the same with the current committed `HEAD`.
 Then bind a key in `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + F3", "Window overview", "omarchy-shell shell toggle git-spren.overview")
-o.bind("SUPER + F4", "Show desktop", [[omarchy-shell shell toggle git-spren.overview '{"mode":"desktop"}']])
+o.bind("F3", "Window overview", "omarchy-shell shell toggle git-spren.overview")
+o.bind("SUPER + F3", "Show desktop", [[omarchy-shell shell toggle git-spren.overview '{"mode":"desktop"}']])
 ```
+
+These mirror a Mac keyboard, where `F3` is Mission Control and `Command + F3` shows
+the desktop; any other keys work the same way.
 
 Optional: Omarchy fades every overlay in by default. To make the overview appear
 instantly, like Omarchy's own menus, add this to `~/.config/hypr/looknfeel.lua`:
@@ -198,7 +202,7 @@ omarchy plugin remove git-spren.overview --yes
 This disables the plugin, which drops its entry in `~/.config/omarchy/shell.json` and the
 settings on it, and deletes its folder under `~/.config/omarchy/plugins/`
 (`omarchy plugin disable git-spren.overview` does only the first part). Then delete the
-`SUPER + F3` binding and the `layer_rule` line you added to `~/.config/hypr/`. Windows you
+`F3` / `SUPER + F3` bindings and the `layer_rule` line you added to `~/.config/hypr/`. Windows you
 tagged `overview-hide` or `overview-redact` keep the tag until they close, or until you run
 `clear` before removing the plugin.
 
