@@ -33,6 +33,9 @@ https://github.com/user-attachments/assets/f39c104f-9b83-4d30-a0dc-8fead5ab9c25
   workspace, Enter or Space focuses the selected window.
 - **Animations.** By default the overview zooms out from the live desktop and zooms
   back into the workspace you pick when it closes.
+- **Show desktop.** A second key pushes the windows of the current workspace off to
+  the screen edges, leaving a thin strip of each, to show the wallpaper (see
+  [Show desktop](#show-desktop)).
 - **Themed.** Colours come from the current Omarchy theme's menu tokens.
 - **Hide or redact windows.** Windows with the Hyprland tag `overview-hide` are left
   out; `overview-redact` keeps the window but shows a black box and the app name
@@ -93,6 +96,27 @@ Windows that Hyprland keeps out of screen sharing (the `no_screen_share` window-
 property, which Omarchy sets for 1Password and Bitwarden) are redacted as well. Set
 `redactNoScreenShare` to `false` to show them normally.
 
+### Show desktop
+
+```sh
+omarchy-shell git-spren.overview desktop ""                          # toggle
+omarchy-shell shell toggle git-spren.overview '{"mode":"desktop"}'   # the same, for a binding
+```
+
+Every window on the focused monitor slides toward the screen edge nearest its centre
+(a window in the middle, such as a fullscreen one, goes down) until a strip of
+`desktopStrip` pixels is left; windows that overlap on the same edge fan out so each
+keeps its own strip. The same command again, `Escape` or a click anywhere slides them
+back.
+
+It is a peek, not a mode to work in: the overview draws the wallpaper and a picture of
+each window over the real ones, so the real windows never move and your tiling is
+untouched, but nothing on the desktop can be clicked while it is up. The bar stays
+visible (not under a fullscreen window), windows on other monitors stay where they
+are, and hidden and redacted windows are treated as in the overview. It needs an image
+wallpaper; with a video background the command answers `no wallpaper image to show`.
+`animate: "none"` shows and removes the peek without the slide.
+
 ## Keys
 
 | Key | Action |
@@ -124,6 +148,7 @@ omarchy-shell git-spren.overview redact ""                        # tag the focu
 omarchy-shell git-spren.overview hide "keepass"                   # tag the one window matching a search
 omarchy-shell git-spren.overview clear 0x55d0c1a2b3c0             # remove both tags
 omarchy-shell git-spren.overview set "layout=rows"                # change a setting (see Settings)
+omarchy-shell git-spren.overview desktop ""                       # show desktop: push the windows aside
 ```
 
 `jump`, `list` and the tag commands work while the overview is closed and use the same
@@ -151,6 +176,7 @@ Then bind a key in `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + F3", "Window overview", "omarchy-shell shell toggle git-spren.overview")
+o.bind("SUPER + F4", "Show desktop", [[omarchy-shell shell toggle git-spren.overview '{"mode":"desktop"}']])
 ```
 
 Optional: Omarchy fades every overlay in by default. To make the overview appear
@@ -210,6 +236,7 @@ Disabling the plugin removes its entry, and its settings with it.
 | `animationDuration` | milliseconds, 60–1000 | `350` |
 | `closeFadeStart` / `closeFadeEnd` | when the close fades the overlay out, in percent of `animationDuration` (0–100); it is gone at `closeFadeEnd` | `80` / `95` |
 | `backdrop` | `"wallpaper"` (the desktop background, lightly dimmed) or `"dim"` (a dark scrim over the desktop) | `"wallpaper"` |
+| `desktopStrip` | [show desktop](#show-desktop): pixels of each window left on screen, 8–200 | `32` |
 | `redactNoScreenShare` | redact windows with Hyprland's `no_screen_share` property, like `overview-redact` (`true` or `false`) | `true` |
 | `refreshRate` | thumbnail refreshes per second for windows on visible workspaces (0.5–60), `0` for one snapshot at open, or `"live"` for every frame (heavy on the GPU) | `4` |
 
